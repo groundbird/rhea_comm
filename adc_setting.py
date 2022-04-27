@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
 # coding: utf-8
+'''Description on the ADC setting.'''
 
-from raw_setting import raw_setting
+from raw_setting import RawSetting
 
-class adc_setting(raw_setting):
-    def __init__(self, rbcp_ins, verbose = True):
-        raw_setting.__init__(self, rbcp_ins, verbose, 'ADC')
+ADC_SWAP_ADDR = 0x1200_0000
+ADS_OFFSET = 0x1000_0000
+
+ADS_
+
+class ADCSetting(RawSetting):
+    '''Class to handle ADS4249 chip'''
+    def __init__(self, rbcp_inst, verbose=True):
+        RawSetting.__init__(self, rbcp_inst, verbose, 'ADC')
         self.flag_write = False
         self.write_mode()
-        pass
 
     def _write_reg(self, addr, data):
-        self._write(0x10000000 + addr, data)
-        return
+        self._write(ADS_OFFSET + addr, data)
 
     def _read_reg(self, addr):
-        return self._read(0x10000000 + addr)
+        return self._read(ADS_OFFSET + addr)
 
     def reset(self):
         self._write_reg(0x00, 0x02)
@@ -24,10 +29,12 @@ class adc_setting(raw_setting):
         return
 
     def write_mode(self):
-        if self.flag_write: return
+        if self.flag_write:
+            return
+
         self.flag_write = True
         self._write_reg(0x00, 0x00)
-        return
+
 
     def read_mode(self):
         if not self.flag_write: return
@@ -66,20 +73,59 @@ class adc_setting(raw_setting):
         self._reg_ch_bit(addr, bit_num, False)
         return
 
-    def channel_swap(self, value = None):
-        addr = 0x12000000
-        if value == None:
-            data = self._read(addr)
-            value = 0 if data  else 1 # swap
+    @property
+    def swapped(self):
+        '''Tell whether channel definition is swapped.
+
+        Parameters
+        ----------
+        swapped : bool
+            True if swapped.
+        '''
+        return self._read(ADC_SWAP_ADDR) == 1
+
+    def channel_swap(self, value=None):
+        '''Swap channel A and B.
+
+        Parameters
+        ----------
+        value : int, optional
+            0...normal
+            1...inverted
+            If not specified, read the current value and then swap.
+        '''
+        if value is None:
+            value = 0 if self.swapped  else 1 # swap
         else:
             value = 1 if value else 0
-            pass
-        self._write(addr, value)
-        return
 
-    def degital_on(self):  self.reg_ch_bit_up(0x42, 3)
-    def degital_off(self): self.reg_ch_bit_down(0x42, 3)
+        assert isinstance(value, int)
 
-    pass
+        self._write(ADC_SWAP_ADDR, value)
+
+
+    def set_digital(self, on_off):
+        '''Turn on/off digital function.
+
+        Parameters
+        ----------
+        on_off : bool
+            True to turn on the digital function.
+        '''
+        self._reg_ch_bit()
+        if on_off:
+            self.reg_ch_bit_up(0x42, 3)
+        else:
+            self.reg_ch_bit_down(0x42, 3)
+
+
+
+
+    def digital_on(self):
+        
+
+    def degital_off(self): 
+
+
 
 
