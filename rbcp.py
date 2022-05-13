@@ -1,259 +1,372 @@
 #!/usr/bin/env python3
-
+'''RBCP communication.
+'''
 from sys import stderr
-from struct import pack, unpack
 from time import time, sleep
 import socket
 
-class rbcp_error(Exception): pass
+from rhea_pkg import IP_ADDRESS_DEFAULT, PORT_DEFAULT
 
-class rbcp(object):
-    def __init__(self, ip_address = '192.168.10.16', port_num = 4660):
+RBCP_VER_TYPE   = 0xff
+RBCP_CMD_FLAG_R = 0xc0
+RBCP_CMD_FLAG_W = 0x80
+RBCP_FLAG_MASK  = 0x0f
+RBCP_CMD_MASK = 0xf0
+RBCP_FLAG_CHECK = 0x8
+RBCP_ERROR_MASK = 0x1
+
+RBCP_HEADER_LENGTH = 8
+
+class RBCPPacket:
+    '''RBCP packet class'''
+    def __init__(self, is_read, packet_id, length, address, data=b'', flag=0):
+        self.is_read = is_read
+        self.packet_id = packet_id
+        self.length = length
+        self.address = address
+        self.data = data
+        self.flag = flag
+
+        if self.is_write and (self.length != len(self.data)):
+            raise RBCPError('Inconsistency in length.')
+
+    @property
+    def is_write(self):
+        '''True if the packet is in write mode.'''
+        return not self.is_read
+
+    @property
+    def packet_length(self):
+        '''Calculate packet length.
+
+        Returns
+        -------
+        packet_length : int
+            Length of RBCP packet.
+        '''
+        return 8 + (0 if self.is_read else self.length)
+
+    def repr(self):
+        '''Byte representation of the packet
+
+        Returns
+        -------
+        repr_byte : bytearray
+            Representation of the packet.
+        '''
+        repr_byte = bytearray(self.packet_length)
+        repr_byte[0] = RBCP_VER_TYPE
+        repr_byte[1] = RBCP_CMD_FLAG_R if self.is_read else RBCP_CMD_FLAG_W
+        repr_byte[1] += self.flag
+        repr_byte[2] = self.packet_id
+        repr_byte[3] = self.length
+        repr_byte[4:8] = self.address.to_bytes(4, byteorder='big')
+        repr_byte[8:] = self.data
+
+        return repr_byte
+
+    @classmethod
+    def interpret(cls, packet):
+        '''Interpret the packet and return RBCPPacket object.
+
+        Parameter
+        ---------
+        packet : bytes or bytearray
+            RBCP packet.
+        '''
+        repr_byte = bytearray(packet)
+        assert repr_byte[0] == RBCP_VER_TYPE
+
+        cmd = repr_byte[1] & RBCP_CMD_MASK
+        if cmd == RBCP_CMD_FLAG_R:
+            is_read = True
+        elif cmd == RBCP_CMD_FLAG_W:
+            is_read = False
+        else:
+            raise RBCPError('Wrong cmd.')
+
+        flag = repr_byte[1] & RBCP_FLAG_MASK
+
+        packet_id = repr_byte[2]
+        length = repr_byte[3]
+        address = int.from_bytes(repr_byte[4:8], byteorder='big')
+        data = repr_byte[8:]
+
+        return cls(is_read, packet_id, length, address, data, flag)
+
+    @property
+    def is_ack(self):
+        '''Acknowledge bit status
+
+        Returns
+        -------
+        is_ack : bool
+            True when ack bit is high.
+        '''
+        return bool(self.flag & RBCP_FLAG_CHECK)
+
+    @property
+    def bus_error(self):
+        '''Bus error status.
+
+        Returns
+        -------
+        bus_error : bool
+            True when bus error bit is high.
+        '''
+        return bool(self.flag & RBCP_ERROR_MASK)
+
+    def __str__(self) -> str:
+        srepr =  f'is_read  : {self.is_read}\n'
+        srepr += f'flag     : {self.flag:02x}\n'
+        srepr += f'packet_id: {self.packet_id:02x}\n'
+        srepr += f'length   : {self.length}\n'
+        srepr += f'Address  : 0x{self.address:08x}'
+
+        for i, d_int in enumerate(self.data):
+            srepr += f'\nData{i:03d}: {d_int:02x}'
+
+        return srepr
+
+class RBCPError(Exception):
+    '''RBCP error.'''
+
+class RBCP:
+    '''Configuration of the readout with protocol called RBCP.'''
+    def __init__(self, ip_address=IP_ADDRESS_DEFAULT, port_num=PORT_DEFAULT,
+                 retry_max=30):
         # setting
-        self.error_try_count = 10
-        self.buff_size       = 4096
-        # sitcp parameter
-        self.ver_type   = pack('B', 0xff)
-        self.cmd_flag_r = pack('B', 0xc0)
-        self.cmd_flag_w = pack('B', 0x80)
-        self.flag_mask  = 0xf
-        self.flag_check = 0x8
+        self._error_try_count = 10
+        self._buff_size       = 4096
+        self._retry_max       = retry_max
+
         self.packet_id  = int(time()) %  256
+
         self.read_buff  = b''
         # make socket
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.connect((ip_address, port_num))
         self.sock.settimeout(0.1)
-        #self.clear()
-        return
 
     def __push(self, buff):
         error_cnt = 0
-        while error_cnt < self.error_try_count:
+
+        while error_cnt < self._error_try_count:
             error_cnt += 1
             send_byte = self.sock.send(buff)
             buff = buff[send_byte:]
-            if len(buff) == 0: break
-            sleep(0.1)
-            pass
-        if error_cnt >= self.error_try_count:
-            raise rbcp_error('rbcp.__push: send error')
-        return
 
-    def __pull(self, byte):
+            if len(buff) == 0:
+                break
+
+            sleep(0.1)
+
+        if error_cnt >= self._error_try_count:
+            raise RBCPError('rbcp.__push: send error')
+
+    def __pull(self, length):
         error_cnt = 0
-        while error_cnt < self.error_try_count:
-            if len(self.read_buff) >= byte: break
+        while error_cnt < self._error_try_count:
+            if len(self.read_buff) >= length:
+                break
             error_cnt += 1
+
             try:
-                self.read_buff += self.sock.recv(self.buff_size)
+                self.read_buff += self.sock.recv(self._buff_size)
             except socket.timeout:
                 pass
-            pass
-        if error_cnt >= self.error_try_count:
-            raise rbcp_error('rbcp.__pull: receive error')
-        buff = self.read_buff[0:byte]
-        self.read_buff = self.read_buff[byte:]
+
+        if error_cnt >= self._error_try_count:
+            raise RBCPError('rbcp.__pull: receive error')
+
+        buff = self.read_buff[0:length]
+        self.read_buff = self.read_buff[length:]
+
         return buff
 
     def clear(self):
-        buff = b''
+        '''Flush UDP'''
         error_cnt = 0
-        while error_cnt < self.error_try_count:
+        while error_cnt < self._error_try_count:
             try:
-                self.sock.recv(self.buff_size)
+                self.sock.recv(self._buff_size)
             except socket.timeout:
                 error_cnt += 1
-                pass
-            pass
-        return
 
-    def _send(self, address, data = 1):
-        ''' when type(data) == int, output read packet '''
-        ## check data
-        if type(data) == int:
-            len_data = data
-            data = b''
+    def _send(self, address, data=1):
+        '''Create and send RBCP packet to the firmware.
+
+        Parameters
+        ----------
+        address : int
+            Register address. Should be less than 2**32
+        data : bytes, bytearray or int
+            To write data to register, specify data here with bytes or bytearray.
+            To read register, put length here in integer.
+        '''
+        if isinstance(data, int):
+            is_read = True
+            payload = ''
+            length = data
         else:
-            len_data = len(data)
-            pass
-        ## make packet
-        buff = b''
-        ## header
-        buff += self.ver_type
-        if data == b'':
-            buff += self.cmd_flag_r
-        else:
-            buff += self.cmd_flag_w
-            pass
-        ## packet ID
-        self.packet_id += 1
-        self.packet_id %= 256
-        buff += pack('B', self.packet_id)
-        ## data length
-        if len_data > 0xFF:
-            raise rbcp_error(f'rbcp._write: data length error: {len_data}')
-        buff += pack('B', len_data)
-        ## address
-        if address > 0xFFFFFFFF or address < 0:
-            raise rbcp_error(f'rbcp._write: address error: {address}')
-        buff += pack('>I', address)
-        ## data
-        buff += data
-        ## send
-        self.__push(buff)
-        return
+            is_read = False
+            payload = data
+            length = len(payload)
+
+        self.packet_id = (self.packet_id + 1) % 256
+
+        packet = RBCPPacket(is_read, self.packet_id, length, address,
+                            data=payload)
+
+        self.__push(packet.repr())
 
     def _recv(self):
+        '''Receive data according to the packet information.'''
         while True:
-            buff = self.__pull(8)
-            data_len = unpack('B', buff[3:4])[0]
-            buff += self.__pull(data_len)
-            #self.__print_packet(buff) # for debug
-            ver_type, cmd_flag, packet_id = unpack('BBB', buff[0:3])
-            #print(f'ver_type={ver_type}, cmd_flag={cmd_flag}, packet_id={packet_id}')
-            if buff[0:1] != self.ver_type:
-                raise rbcp_error(f'rbcp._recv: ver_type error: {ver_type}')
-            if cmd_flag & self.flag_mask != self.flag_check:
-                raise rbcp_error(f'rbcp._recv: cmd_flag error: {cmd_flag}')
-            if packet_id == self.packet_id: break
-            #print 'ID error' # for debug
-            pass
-        return buff[8:]
+            header = self.__pull(RBCP_HEADER_LENGTH)
+            length = header[3]
+            payload = self.__pull(length)
 
-    def __print_packet(self, buff):
-        print(f'ver_type: {unpack("B",  buff[0:1])[0]:02x}', file=stderr)
-        print(f'cmd_flag: {unpack("B",  buff[1:2])[0]:02x}', file=stderr)
-        print(f'packetID: {unpack("B",  buff[2:3])[0]:02x}', file=stderr)
-        print(f'data_len: {unpack("B",  buff[3:4])[0]}',     file=stderr)
-        print(f'address : {unpack(">I", buff[4:8])[0]:02x}', file=stderr)
-        data_no = 0
-        for c in buff[8:]:
-            print(f'Data{data_no:03d}: {unpack("B",c)[0]:02x}', file=stderr)
-            data_no += 1
-            pass
-        return
+            packet = RBCPPacket.interpret(header + payload)
 
-    def read(self, address, length = 1):
-        #self._send(address, length)
-        #return self._recv()
+            if packet.packet_id == self.packet_id:
+                break
+
+        return packet.data
+
+    def read(self, address, length=1):
+        '''RBCP read.
+
+        Parameters
+        ----------
+        address : int
+            RBCP address. Should be less than 2**32.
+        length : int
+            Number of bytes to be read.
+
+        Returns
+        -------
+        payload : bytearray
+            Data.
+        '''
         retry_cnt = 0
         while True:
             try:
                 self._send(address, length)
-                ret = self._recv()
+                payload = self._recv()
                 break
-            except:
+            except RBCPError as err:
                 retry_cnt += 1
-                if retry_cnt > 30: raise
+                if retry_cnt > self._retry_max:
+                    raise RBCPError from err
+
                 print(f"rbcp.write: error! retry: {retry_cnt}", file=stderr)
                 sleep(0.1)
                 continue
-            pass
-        return ret
+
+        return payload
 
     def write(self, address, data):
-#        if type(data) != str:
-#            raise rbcp_error(f'rbcp.write: data type error: {type(data)}')
-        # self._send(address, str(data))
-        # ret = self._recv()
+        '''Write data to RBCP register.
+
+        Parameters
+        ----------
+        address : int
+            RBCP register address.
+        data : bytes or bytearray
+            Data.
+
+        Returns
+        -------
+        payload : bytearray
+            Data.
+        '''
         retry_cnt = 0
         while True:
             try:
                 self._send(address, data)
                 ret = self._recv()
                 break
-            except:
+            except RBCPError as err:
                 retry_cnt += 1
-                if retry_cnt > 30: raise
+                if retry_cnt > self._retry_max:
+                    raise RBCPError from err
                 print(f"rbcp.write: error! retry: {retry_cnt}", file=stderr)
                 sleep(0.1)
                 continue
-            pass
+
         return ret
 
+    def read_intn(self, address, length):
+        '''Read n bytes and return data interpreted as integer.
+
+        Parameters
+        ----------
+        address : int
+            RBCP address.
+        length : int
+            Length to be read.
+
+        Returns
+        -------
+        data : int
+            Data interpreted as a big-endian integer.
+        '''
+        buff = self.read(address, length=length)
+        return int.from_bytes(buff, byteorder='big')
+
     def read_int1(self, address):
-        buff = self.read(address, length = 1)
-        return unpack('B', buff)[0]
+        '''Read 1 byte.'''
+        return self.read_intn(address, 1)
 
     def read_int2(self, address):
-        buff = self.read(address, length = 2)
-        return unpack('>H', buff)[0]
+        '''Read 2 bytes.'''
+        return self.read_intn(address, 2)
 
     def read_int4(self, address):
-        buff = self.read(address, length = 4)
-        return unpack('>I', buff)[0]
+        '''Read 4 bytes.'''
+        return self.read_intn(address, 4)
 
-    def write_int1(self, address, data):
-        return self.write(address, pack('B', data))
+    def write_intn(self, address, data_int, length):
+        '''Write n bytes by intepreting given integer
+        into a byte array of a specified length.
 
-    def write_int2(self, address, data):
-        return self.write(address, pack('>H', data))
+        Parameters
+        ----------
+        address : int
+            RBCP address.
+        data : int
+            Data integer.
+        length : int
+            Interpretation length.
 
-    def write_int4(self, address, data):
-        return self.write(address, pack('>I', data))
+        Returns
+        -------
+        ret_data : bytearray
+            Returned byte array.
+        '''
+        assert isinstance(data_int, int)
+
+        data = data_int.to_bytes(length, byteorder='big')
+
+        return self.write(address, data)
+
+    def write_int1(self, address, data_int):
+        '''Write 1 byte from int.'''
+        return self.write_intn(address, data_int, 1)
+
+    def write_int2(self, address, data_int):
+        '''Write 2 bytes from int.'''
+        return self.write_intn(address, data_int, 2)
+
+    def write_int4(self, address, data_int):
+        '''Write 4 bytes from int.'''
+        return self.write_intn(address, data_int, 4)
 
 
-    pass
-
-
-
-def test1():
-    r = rbcp()
-    r._send(0xFFFFFF00, 4)
-    print(unpack('I', r._recv()))
-    return
-
-def test2():
-    r = rbcp()
-    r._send(0xFFFFFF18, 4)
-    r._recv()
-    print()
-    r._send(0xFFFFFF1c, 2)
-    r._send(0xFFFFFF1c, 2)
-    r._recv()
-    print()
-    r._send(0xFFFFFF22, 2)
-    r._recv()
-    return
-
-def test3():
-    r = rbcp()
-    print(r.read_int4(0xFFFFFF18))
-    print(r.read_int1(0xFFFFFF18))
-    print(r.read_int1(0xFFFFFF19))
-    print(r.read_int1(0xFFFFFF1a))
-    print(r.read_int1(0xFFFFFF1b))
-    print(r.read_int2(0xFFFFFF1c))
-    print(r.read_int2(0xFFFFFF22))
-    return
-
-def test4():
-    r = rbcp()
-    print('MAC address')
-    print('%02x' % r.read_int1(0xFFFFFF12))
-    print('%02x' % r.read_int1(0xFFFFFF13))
-    print('%02x' % r.read_int1(0xFFFFFF14))
-    print('%02x' % r.read_int1(0xFFFFFF15))
-    print('%02x' % r.read_int1(0xFFFFFF16))
-    print('%02x' % r.read_int1(0xFFFFFF17))
-    return
-
-def test5():
-    r = rbcp()
-    print(r.read_int2(0xFFFFFF1C))
-    print(r.read_int2(0xFFFFFF1E))
-    #r.write_int2(0xFFFFFF1C, 20)
-    r.write_int2(0xFFFFFF1C, 24)
-    print(r.read_int2(0xFFFFFF1C))
-    print(r.read_int2(0xFFFFFF1E))
-    return
-
+def main():
+    '''Main function.'''
+    print('Nothing')
 
 if __name__ == '__main__':
-    #test1()
-    #test2()
-    #test3()
-    #test4()
-    test5()
-    exit(0)
+    main()

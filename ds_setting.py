@@ -1,23 +1,33 @@
 #!/usr/bin/env python3
 # coding: utf-8
+'''Definition for downsampler handler'''
 
-from raw_setting import raw_setting
+from raw_setting import RawSetting
 
-class ds_setting(raw_setting):
-    def __init__(self, rbcp_ins, verbose = True):
-        raw_setting.__init__(self, rbcp_ins, verbose, 'DS ')
-        pass
+DS_OFFSET = 0x61000000
 
-    def set_rate(self, rate_num):
-        ## DS_RATE_MIN(10) <= rate_num <= DS_RATE_MAX(200000)
-        addr = 0x61000000
-        data = rate_num
-        self._write4(addr, data)
-        return
+class DsSetting(RawSetting):
+    '''Downsampler handler'''
+    def __init__(self, rbcp_ins, verbose=True):
+        RawSetting.__init__(self, rbcp_ins, verbose, 'DS')
 
-    def get_rate(self):
-        addr = 0x61000000
-        data = self._read4(addr)
-        return data
+    def set_accum(self, accum_num):
+        '''Set accumulation number.
 
-    pass
+        Parameter
+        ---------
+        accum_num : int
+            Accumulation number.
+        '''
+        assert 10 <= accum_num <= 200000
+        self._write4(DS_OFFSET, accum_num)
+
+    def get_accum(self):
+        '''Get accumulation number.
+
+        Returns
+        -------
+        accum_num : int
+            Accumulation number.
+        '''
+        return self._read4(DS_OFFSET)

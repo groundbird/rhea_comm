@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # coding: utf-8
+'''Description of snapshot core handler.'''
 
-from raw_setting import raw_setting
+from raw_setting import RawSetting
 
-class snap_setting(raw_setting):
+class SnapSetting(RawSetting):
+    '''Snapshot handler.'''
     def __init__(self, rbcp_ins, verbose = True):
-        raw_setting.__init__(self, rbcp_ins, verbose, 'SNP')
+        RawSetting.__init__(self, rbcp_ins, verbose, 'SNP')
         self.src_list = {'DDS'   : 0,
                          'DAC'   : 1,
                          'ADC'   : 2,
@@ -13,7 +15,6 @@ class snap_setting(raw_setting):
                          'TEST'  : 4,
                          'PHASE' : 5}
         self.src_list_inv = {str(v):k for k, v in self.src_list.items()}
-        pass
 
     def get_snapstatus(self):
         return self._read(0x30000000)
