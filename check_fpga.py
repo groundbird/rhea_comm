@@ -5,7 +5,7 @@ from time   import sleep
 import numpy as np
 
 from packet_reader import read_iq_packet
-from fpga_control  import fpga_control
+from fpga_control  import FPGAControl
 
 ## constant
 RHEACLK_RATE = 200e6 # Hz
@@ -19,7 +19,7 @@ def get_packet_size(ntones):
     return 7 + 7 * 2 * ntones
 
 ## main
-def check_fpga(fpga, MAX_CH, dds_f_MHz, rate_kSPS=1, power=1, amps=None, phases=None, is_norm=False, verbose=False):
+def check_fpga(fpga, max_ch, dds_f_MHz, rate_kSPS=1, power=1, amps=None, phases=None, is_norm=False, verbose=False):
 
     def vprint(*args,**kwargs):
         if verbose:
@@ -41,17 +41,17 @@ def check_fpga(fpga, MAX_CH, dds_f_MHz, rate_kSPS=1, power=1, amps=None, phases=
         vprint('-- tcp.clear()')
         fpga.tcp.clear()
 
-        dds_frq = [freq * 1e6 for freq in dds_f_MHz] * int(power) + [0.] * (MAX_CH - int(power)*len(dds_f_MHz))
+        dds_frq = [freq * 1e6 for freq in dds_f_MHz] * int(power) + [0.] * (max_ch - int(power)*len(dds_f_MHz))
         vprint(f'-- dds.set_freqs()    :  |'+'|'.join([f' {x:+4.3f} ' for x in dds_f_MHz])+'|')
         fpga.dds.set_freqs(dds_frq)
 
         amps = [1.]*len(dds_f_MHz) if amps is None else amps
-        dds_amp = amps * int(power) + [0.] * (MAX_CH - int(power)*len(amps))
+        dds_amp = amps * int(power) + [0.] * (max_ch - int(power)*len(amps))
         vprint(f'-- dds.set_amps()     :  |'+'|'.join([f'  {x:1.4f} ' for x in amps])+'|')
         fpga.dds.set_amps(dds_amp)
 
         phases = [0.]*len(dds_f_MHz) if phases is None else phases
-        dds_phs = phases * int(power) + [0.] * (MAX_CH - int(power)*len(phases))
+        dds_phs = phases * int(power) + [0.] * (max_ch - int(power)*len(phases))
         vprint(f'-- dds.set_phases()   :  |'+'|'.join([f' {x:+1.4f} ' for x in phases])+'|')
         fpga.dds.set_phases(dds_phs)
 
@@ -80,7 +80,7 @@ def check_fpga(fpga, MAX_CH, dds_f_MHz, rate_kSPS=1, power=1, amps=None, phases=
         if buff is not None:
             vprint('='*80)
             time, data, nrot, sync = read_iq_packet(buff)
-            print(f'time = {time}, nrot = {nrot}, sync_off = {sync}, #_IQ_column = {len(data)}, rate = {rate_kSPS:d}kSPS, tone_power = {power:d}/{MAX_CH:d} = {RHEADAC_DBM + 20*np.log10(power/MAX_CH):.3}dBm')
+            print(f'time = {time}, nrot = {nrot}, sync_off = {sync}, #_IQ_column = {len(data)}, rate = {rate_kSPS:d}kSPS, tone_power = {power:d}/{max_ch:d} = {RHEADAC_DBM + 20*np.log10(power/max_ch):.3}dBm')
             print('FREQ  : '+'  '.join([f'{x:+18.3f}' for x in dds_f_MHz]))
             fact = (2**RHEAADC_BIT) * RHEACLK_RATE / (rate_kSPS*1e3) if is_norm else 1.
             print('S21amp: '+'  '.join([f'{abs(data[2*i] + 1j*data[2*i+1])/fact:1.12e}' for i in np.arange(0,int(len(data)/2))]))
@@ -154,23 +154,23 @@ if __name__ == '__main__':
         if status == 1:
             print(f"No ping resoponse from {ip}...")
             raise TimeoutError
-        fpga = fpga_control(ip_address=ip)
-        MAX_CH = fpga.MAX_CH
+        fpga = FPGAControl(ip_address=ip)
+        max_ch = fpga.max_ch
         dds_f_MHz = []
         if len(freqs)>0:
-            if len(freqs) > MAX_CH:
-                raise Exception(f'too many frequencies! = {len(freqs)} / {MAX_CH}')
-            if power>0 and len(freqs)*power > MAX_CH:
-                raise Exception(f'exceeding max # of channels = {len(freqs)}*{power} > {MAX_CH}')
+            if len(freqs) > max_ch:
+                raise Exception(f'too many frequencies! = {len(freqs)} / {max_ch}')
+            if power>0 and len(freqs)*power > max_ch:
+                raise Exception(f'exceeding max # of channels = {len(freqs)}*{power} > {max_ch}')
 
             def two_div(val):
                 if val < 2: return 0;
                 return len(bin(val-1)) -2
 
             input_len = 2**two_div(len(freqs))
-            if power >0 and power*input_len > MAX_CH:
-                raise Exception(f'exceeding max # of channels = {input_len}*{power} > {MAX_CH}')
-            power = floor(float(MAX_CH) / float(len(freqs))+0.1) if power<0 else power
+            if power >0 and power*input_len > max_ch:
+                raise Exception(f'exceeding max # of channels = {input_len}*{power} > {max_ch}')
+            power = floor(float(max_ch) / float(len(freqs))+0.1) if power<0 else power
 
             if int(RHEACLK_RATE*1e-3) % rate_kSPS != 0:
                 raise Exception(f'sampling rate [kSPS] should be a divisor of 2000000: input rate = {rate_kSPS} kSPS')
@@ -190,7 +190,7 @@ if __name__ == '__main__':
         pass
 
     check_fpga(fpga        = fpga,
-               MAX_CH      = MAX_CH,
+               max_ch      = max_ch,
                dds_f_MHz   = dds_f_MHz,
                rate_kSPS   = rate_kSPS,
                power       = power,

@@ -6,11 +6,13 @@ from raw_setting import RawSetting
 
 TRG_STATUS   = 0x70000000
 TRG_POSITION = 0x70000010
+TRG_THRCOUNT = 0x70000020
 TRG_PRE_MAX = 1000
 TRG_ENABLE = lambda ch: 0x71000000 + (ch << 8)
 TRG_THR_MAX = (1<<55)
 TRG_THR_MIN = -(1<<55) + 1
 TRG_THR_BASE = 0x71000000
+
 
 class TrgSetting(RawSetting):
     '''Trigger core setting'''
@@ -146,7 +148,7 @@ class TrgSetting(RawSetting):
             addr += (channel << 8)
             addr += ((i+1) << 4)
 
-            self._write_n(8, addr, thr_val, signed=True)            
+            self._write_n(8, addr, thr_val, signed=True)
 
         if set_en:
             self.set_enable(channel, trg_reset=False)
@@ -169,29 +171,39 @@ class TrgSetting(RawSetting):
         '''
         assert channel in range(self.max_ch), f'Ch{channel:d} does not exist.'
 
-        ret = []
+        ret = [0, 0, 0, 0]
         for i in range(4):
             addr  = TRG_THR_BASE
-            addr += (channel << 8)
-            addr += ((i+1) << 4)
-            v_u = self._read4(addr + 0)
-            v_d = self._read4(addr + 4)
-            ret += [(v_u << 32) + v_d]
-            pass
+            ret[i] = self._read_n(8, addr, signed=True)
+
         return [ret[0:2], ret[2:4]]
 
-    def set_thre_count(self, count, trg_reset = True):
-        if type(count) is not int:
-            print('set_thre_count: count should be int.')
-            return
-        if count > 1000 or count < 0:
-            print('set_thre_count: count should be 0 -- 1000')
-            return
+    def set_thre_count(self, count, trg_reset=True):
+        '''Sets the number of points exceeding threashold reqired to issue trigger.
+        The trigger is issued if the data exceeds the threshold for the specified number
+        of consective points.
+
+        Parameters
+        ----------
+        count : int
+            Number of threshold-exceeding points required for issuing trigger.
+        trg_reset : bool
+            Do reset after the configuration (default: True).
+        '''
+        assert isinstance(count, int), 'set_thre_count: count should be int.'
+        assert 0 < count < 1000, 'set_thre_count: count should be 0 -- 1000'
+
         self._write2(0x70000020, count & 0xffff)
-        if trg_reset: self.reset()
-        return
+
+        if trg_reset:
+            self.reset()
 
     def get_thre_count(self):
-        return self._read2(0x70000020)
+        '''Gets the number of points exceeding threashold reqired to issue trigger.
 
-    pass
+        Returns
+        -------
+        count : int
+            Number of threshold-exceeding points required for issuing trigger.
+        '''
+        return self._read2(0x70000020)

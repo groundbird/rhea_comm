@@ -72,7 +72,7 @@ class ClockMan(RawSetting):
         angle : float
             Angle of phase in degree.
         '''
-        reg_addrs = [0x200 + 4*i for i in range(range(2 + 3*CLOCK_MAN_NCH))]
+        reg_addrs = [0x200 + 4*i for i in range(2 + 3*CLOCK_MAN_NCH)]
         reg_dict = {addr : self._read_axi(addr) for addr in reg_addrs}
         self.soft_reset()
 

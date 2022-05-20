@@ -5,7 +5,7 @@ from sys import stderr
 from time import time, sleep
 import socket
 
-from rhea_pkg import IP_ADDRESS_DEFAULT, PORT_DEFAULT
+from rhea_pkg import IP_ADDRESS_DEFAULT, RBCP_PORT_DEFAULT
 
 RBCP_VER_TYPE   = 0xff
 RBCP_CMD_FLAG_R = 0xc0
@@ -133,7 +133,7 @@ class RBCPError(Exception):
 
 class RBCP:
     '''Configuration of the readout with protocol called RBCP.'''
-    def __init__(self, ip_address=IP_ADDRESS_DEFAULT, port_num=PORT_DEFAULT,
+    def __init__(self, ip_address=IP_ADDRESS_DEFAULT, port_num=RBCP_PORT_DEFAULT,
                  retry_max=30):
         # setting
         self._error_try_count = 10

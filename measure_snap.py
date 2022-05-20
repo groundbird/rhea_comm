@@ -9,14 +9,14 @@ source_default = 'IQ'
 
 
 ## constant
-from fpga_control import fpga_control
-fpga = fpga_control()
-MAX_CH = fpga.MAX_CH
+from fpga_control import FPGAControl
+fpga = FPGAControl()
+MAX_CH = fpga.max_ch
 
 ## check firmware
 from sys import stderr
-if not fpga.EN_SNAP:
-    print(f'Firmware version: {fpga.info.get_version():d}', file=stderr)
+if not fpga.en_snap:
+    print(f'Firmware version: {fpga.info.version:d}', file=stderr)
     print('Snapshot function is disable!', file=stderr)
     exit(1)
     pass
@@ -32,8 +32,8 @@ def measure_snap(dds_f_MHz, source, channel, fname):
         pass
 
     fpga.init()
-    fpga.dds.set_freqs([freq * 1e6 for freq in dds_f_MHz])
-    fpga.snap.set_src(source, channel)
+    fpga.dds_setting.set_freqs([freq * 1e6 for freq in dds_f_MHz])
+    fpga.snap_setting.set_src(source, channel)
 
     f = open(fname, 'wb')
 
@@ -54,7 +54,7 @@ def measure_snap(dds_f_MHz, source, channel, fname):
     empty_count = 0
 
     fpga.tcp.clear()
-    fpga.snap.snap_on()
+    fpga.snap_setting.snap_on()
 
     while True:
         buff = fpga.tcp.read(1024)
@@ -69,7 +69,7 @@ def measure_snap(dds_f_MHz, source, channel, fname):
         pass
 
     f.close()
-    fpga.dac.txenable_off()
+    fpga.dac_setting.txenable_off()
     print(f'write raw data to {fname}')
 
 
@@ -100,11 +100,15 @@ if __name__ == '__main__':
                 args = args[1:]
                 pass
             pass
-        if len(arg_val) > MAX_CH: raise
-        if len(arg_val) == 0    : raise
+        if len(arg_val) > MAX_CH:
+            raise Exception('exceeds max ch.')
+        if len(arg_val) == 0:
+            raise Exception('No DDS freq specified.')
         dds_f_MHz = [float(v) for v in arg_val]
         while len(dds_f_MHz) < MAX_CH: dds_f_MHz.append(0.)
-        if not source in source_list: raise 'source error'
+        if not source in source_list:
+            raise Exception('source error')
+
         if fname == None:
             fname  = 'snap'
             fname += f'_{source:s}'
@@ -112,8 +116,7 @@ if __name__ == '__main__':
             fname += strftime('_%Y-%m%d-%H%M%S')
             fname += '.rawdata'
         if isfile(fname):
-            print(f'{fname:s} is existed.', file=stderr)
-            raise
+            raise Exception(f'{fname:s} exists')
     except:
         print( 'Usage: measure_snap.py [freq0_MHz] [freq1_MHz] ...', file=stderr)
         print( '       option: -f [filename]     (mandantory)', file=stderr)

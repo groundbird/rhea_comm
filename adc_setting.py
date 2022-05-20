@@ -1,34 +1,41 @@
 #!/usr/bin/env python3
 # coding: utf-8
 '''Description on the ADC setting.'''
-
+from enum import IntEnum
 from raw_setting import RawSetting
 
 ADC_SWAP_ADDR = 0x1200_0000
 ADS_OFFSET = 0x1000_0000
 
-<<<<<<< HEAD
+ADS_TEST_PATTERN_MASK = 0b0000111
 
 class ADSWriteRead:
     '''ADS write/read setting.'''
     write = True
     read = False
 
-=======
-ADS_
->>>>>>> 170515dd425b9fb3002417102982a95f68b29bda
+class ADSChannel(IntEnum):
+    '''ADS channel'''
+    A = 0
+    B = 1
 
-class ADCSetting(RawSetting):
+class ADSTestPattern(IntEnum):
+    '''ADS test pattern.'''
+    NORMAL = 0b000
+    ALL_0 = 0b001
+    ALL_1 = 0b010
+    # 10101010101010 <=> 01010101010101
+    TOGGLE = 0b011
+    RAMP = 0b100
+    CUSTOM = 0b101
+
+
+class AdcSetting(RawSetting):
     '''Class to handle ADS4249 chip'''
     def __init__(self, rbcp_inst, verbose=True):
         RawSetting.__init__(self, rbcp_inst, verbose, 'ADC')
-<<<<<<< HEAD
         self._flag_write = ADSWriteRead.read
         self.set_write_mode()
-=======
-        self.flag_write = False
-        self.write_mode()
->>>>>>> 170515dd425b9fb3002417102982a95f68b29bda
 
     def _write_reg(self, addr, data):
         self._write(ADS_OFFSET + addr, data)
@@ -42,19 +49,9 @@ class ADCSetting(RawSetting):
         self._flag_write = ADSWriteRead.write
         self.channel_swap(False)
 
-<<<<<<< HEAD
     def _set_wr_mode(self, write_read):
         if self._flag_write == write_read:
             return
-=======
-    def write_mode(self):
-        if self.flag_write:
-            return
-
-        self.flag_write = True
-        self._write_reg(0x00, 0x00)
-
->>>>>>> 170515dd425b9fb3002417102982a95f68b29bda
 
         self._flag_write = write_read
         self._write_reg(0x00, 0 if write_read == ADSWriteRead.write else 1)
@@ -139,10 +136,6 @@ class ADCSetting(RawSetting):
         '''
         self._reg_ch_bit(addr, bit_num, False)
 
-<<<<<<< HEAD
-
-=======
->>>>>>> 170515dd425b9fb3002417102982a95f68b29bda
     @property
     def swapped(self):
         '''Tell whether channel definition is swapped.
@@ -173,8 +166,6 @@ class ADCSetting(RawSetting):
 
         self._write(ADC_SWAP_ADDR, value)
 
-<<<<<<< HEAD
-
     def set_digital(self, on_off):
         '''Turn on/off digital function.
 
@@ -188,37 +179,28 @@ class ADCSetting(RawSetting):
             self.reg_ch_bit_up(0x42, 3)
         else:
             self.reg_ch_bit_down(0x42, 3)
-=======
-
-    def set_digital(self, on_off):
-        '''Turn on/off digital function.
-
-        Parameters
-        ----------
-        on_off : bool
-            True to turn on the digital function.
-        '''
-        self._reg_ch_bit()
-        if on_off:
-            self.reg_ch_bit_up(0x42, 3)
-        else:
-            self.reg_ch_bit_down(0x42, 3)
-
-
-
-
-    def digital_on(self):
-        
-
-    def degital_off(self): 
-
-
->>>>>>> 170515dd425b9fb3002417102982a95f68b29bda
 
     def set_digital_on(self):
         '''Turn on digital function.'''
         self.set_digital(True)
 
-    def degital_off(self):
+    def set_digital_off(self):
         '''Turn off digital function.'''
         self.set_digital(False)
+
+    def set_test_pattern(self, channel:ADSChannel, pattern:ADSTestPattern):
+        '''Set test pattern.
+
+        Parameters
+        ---------
+        channel : ADSChannel, int
+            A: 0, B: 1
+        pattern : ADSTestPattern, int
+            Test pattern.
+        '''
+        address = 0x25 if channel == ADSChannel.A else 0x2b
+
+        pval = self.read_reg(address)
+        cval = (pval & ~ADS_TEST_PATTERN_MASK) | pattern
+
+        self.write_reg(address, cval)

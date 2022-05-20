@@ -1,101 +1,123 @@
 #!/usr/bin/env python3
-
+'''Readout controller.'''
 import fcntl
+import sys
+import os
+import stat
 
-from rbcp          import rbcp
-from info_setting  import info_setting
-from adc_setting   import adc_setting
-from dac_setting   import dac_setting
-from dds_setting   import dds_setting
-from iq_setting    import iq_setting
-from ds_setting    import ds_setting
-from snap_setting  import snap_setting
-from trg_setting   import trg_setting
-from debug_setting import debug_setting
-from tcp           import tcp
+from rbcp          import RBCP
+from info_setting  import InfoSetting
+from adc_setting   import AdcSetting
+from dac_setting   import DacSetting
+from dds_setting   import DdsSetting
+from iq_setting    import IQSetting
+from ds_setting    import DsSetting
+from snap_setting  import SnapSetting
+from trg_setting   import TrgSetting
+from debug_setting import DebugSetting
 
-class fpga_control(object):
-    def __init__(self, verbose = False, ip_address='192.168.10.16'):
-        verbose = True if verbose else False
-        self.__LOCK_PATH = '/tmp/.'+ip_address+'.lock'
-        if verbose: print(f'lock file: {self.__LOCK_PATH}')
+from countup_man import CountupMan
+from clock_man import ClockMan
+
+from tcp           import TCP
+
+
+from rhea_pkg import IP_ADDRESS_DEFAULT, TCP_PORT_DEFAULT, RBCP_PORT_DEFAULT
+
+class FPGAControl:
+    '''FPGA integrated controller.
+
+    Parameters
+    ----------
+    verbose : bool
+        Verbosity.
+    ip_address : str
+        IP address.
+    '''
+    def __init__(self, verbose=False, ip_address=IP_ADDRESS_DEFAULT):
+        self._verbose = verbose
+        self.__lock_path = '/tmp/.'+ip_address+'.lock'
+        self._vprint(f'lock file: {self.__lock_path}')
+
         ## lock file
         try:
-            import os
-            if not os.path.isfile(self.__LOCK_PATH):
-                self.__lockf = open(self.__LOCK_PATH, 'a')
+            if not os.path.isfile(self.__lock_path):
+                self.__lockf = open(self.__lock_path, 'a', encoding='utf-8')
                 self.__lockf.close()
-                import stat
-                os.chmod(self.__LOCK_PATH, mode=stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH) # chmod 666
-                pass
-            self.__lockf = open(self.__LOCK_PATH, 'a')
+                os.chmod(self.__lock_path,
+                         mode=stat.S_IRUSR |\
+                              stat.S_IWUSR |\
+                              stat.S_IRGRP |\
+                              stat.S_IWGRP |\
+                              stat.S_IROTH |\
+                              stat.S_IWOTH) # chmod 666
+
+            self.__lockf = open(self.__lock_path, 'a', encoding='utf-8')
             fcntl.lockf(self.__lockf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except IOError as e:
-            print(f"{self.__LOCK_PATH} is locked.")
-            print(e)
-            exit(1)
-            pass
+        except IOError as err:
+            print(f"{self.__lock_path} is locked.")
+            print(err)
+            sys.exit(1)
 
-        self.rbcp = rbcp(ip_address=ip_address)
-        self.tcp  = tcp(ip_address=ip_address)
 
-        self.info = info_setting(self.rbcp, verbose = verbose)
-        self.MAX_CH  = self.info.get_max_ch()
-        self.EN_SNAP = self.info.get_en_snap()
-        self.TRIG_CH = self.info.get_trig_ch()
+        self.rbcp = RBCP(ip_address=ip_address, port_num=RBCP_PORT_DEFAULT)
+        self.tcp = TCP(ip_address=ip_address, port_num=TCP_PORT_DEFAULT)
 
-        self.adc   = adc_setting(self.rbcp, verbose = verbose)
-        self.dac   = dac_setting(self.rbcp, verbose = verbose)
-        self.dds   = dds_setting(self.rbcp, self.MAX_CH, verbose = verbose)
-        self.iq    = iq_setting(self.rbcp, verbose = verbose)
-        self.ds    = ds_setting(self.rbcp, verbose = verbose)
-        if self.EN_SNAP:
-            self.snap  = snap_setting(self.rbcp, verbose = verbose)
-            pass
-        if self.TRIG_CH > 0:
-            self.trg   = trg_setting(self.rbcp, self.TRIG_CH, verbose = verbose)
-            pass
-        self.debug = debug_setting(self.rbcp, verbose = verbose)
+        self.info = InfoSetting(self.rbcp, verbose=verbose)
+        self.max_ch  = self.info.max_ch
+        self.en_snap = self.info.en_snap
+        self.trig_ch = self.info.trig_ch
 
-        return
+        self.adc_setting = AdcSetting(self.rbcp, verbose=verbose)
+        self.dac_setting = DacSetting(self.rbcp, verbose=verbose)
+        self.dds_setting = DdsSetting(self.rbcp, self.max_ch, verbose=verbose)
+        self.iq_setting = IQSetting(self.rbcp, verbose=verbose)
+        self.ds_setting = DsSetting(self.rbcp, verbose=verbose)
+
+        self.count0 = CountupMan(self.rbcp, verbose=verbose, offset=0x1400_0000)
+        self.count1 = CountupMan(self.rbcp, verbose=verbose, offset=0x1400_0100)
+
+        self.clock = ClockMan(self.rbcp, verbose=verbose)
+
+        if self.en_snap:
+            self.snap_setting  = SnapSetting(self.rbcp, verbose=verbose)
+        if self.trig_ch > 0:
+            self.trg_setting = TrgSetting(self.rbcp, self.trig_ch, verbose=verbose)
+
+        self.debug = DebugSetting(self.rbcp, verbose=verbose)
+
+
+    def _vprint(self, *args, **kwargs):
+        if self._verbose:
+            if 'file' in kwargs:
+                print(*args, **kwargs)
+            else:
+                print(*args, **kwargs, file=sys.stderr)
+
 
     def init(self):
-        print(f'Firmware version: {self.info.get_version():d}')
+        '''Initialize FPGA'''
+        self._vprint(f'Firmware version: {self.info.version:d}')
 
-        self.adc.reset()
-        self.dac.reset()
+        self.adc_setting.reset()
+        self.dac_setting.reset()
 
-        self.dac.channel_swap()
-#        self.adc.channel_swap()
-        self.dac.txenable_on()
+        self.dac_setting.channel_swap()
+        # self.adc.channel_swap()
+        self.dac_setting.txenable_on()
 
-        self.ds.set_rate(200000)
+        self.ds_setting.set_accum(200000)
 
-        self.dds.reset()
+        self.dds_setting.reset()
 
-        self.iq.set_read_width(0)
-        self.iq.iq_off()
-        self.iq.time_reset()
-        self.iq.clear_fifo_fatal_error()
+        self.iq_setting.set_read_width(0)
+        self.iq_setting.iq_off()
+        self.iq_setting.time_reset()
+        self.iq_setting.clear_fifo_error()
 
-        if self.EN_SNAP:
-            self.snap.snap_off()
-            self.snap.time_reset()
-            pass
+        if self.en_snap:
+            self.snap_setting.snap_off()
+            self.snap_setting.time_reset()
 
-        if self.TRIG_CH > 0:
-            self.trg.init()
-            pass
-
-        return
-
-    def _adc_test(self): ## for debug
-        self.adc.write(0x42, (0<<6) + (0<<4)) # clock timing
-        self.adc.degital_on() # test mode
-        self.adc.write(0x25, 0x04) # chA: count up
-        self.adc.write(0x2b, 0x04) # chB: count up
-        #self.adc.write(0x25, 0x03) # chA: 0101 <-> 1010
-        #self.adc.write(0x2b, 0x03) # chB: 0101 <-> 1010
-
-    pass
-
+        if self.trig_ch > 0:
+            self.trg_setting.init()

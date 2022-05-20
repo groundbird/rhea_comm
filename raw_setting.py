@@ -18,9 +18,9 @@ class RawSetting:
             for _i, _d in enumerate(data_byte):
                 print(f'{self._label}: write0x{addr+_i:08x} <== 0x{_d:02x} ({_d:3d})')
 
-    def _read_n(self, length, addr, byteorder='big'):
+    def _read_n(self, length, addr, byteorder='big', signed=False):
         data_byte  = self._rbcp_inst.read(addr, length)
-        data = int.from_bytes(data_byte, signed=False, byteorder=byteorder)
+        data = int.from_bytes(data_byte, signed=signed, byteorder=byteorder)
 
         if self._verbose:
             for _i, _d in enumerate(data_byte):

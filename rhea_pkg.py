@@ -2,6 +2,7 @@
 '''RHEA firmware information'''
 
 FREQ_CLK_HZ = 200_000_000
+RATE_KSPS_DEFAULT   = 1 # 1 kSPS ~ downsample:200000
 
 PHASE_WIDTH      = 32
 SIN_COS_WIDTH    = 16
@@ -13,7 +14,8 @@ DS_RATE_MAX      = 200000
 DDS_AMP_BW       = 8
 
 IP_ADDRESS_DEFAULT = '192.168.10.16'
-PORT_DEFAULT = 4660
+RBCP_PORT_DEFAULT = 4660
+TCP_PORT_DEFAULT = 24
 
 def main():
     '''Nothing to do'''

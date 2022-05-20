@@ -6,6 +6,7 @@ from math import pi
 
 from raw_setting import RawSetting
 from rhea_pkg import FREQ_CLK_HZ, PHASE_WIDTH, DDS_AMP_BW
+from tone_conf import ToneConf
 
 TRIGGER_ENABLE  = 0x40000000
 PHASE_RESET     = 0x40000001
@@ -434,3 +435,15 @@ class DdsSetting(RawSetting):
 
         self.set_sync_span(200000) # 1 kHz span
         self.trig_enable()
+
+    def configure(self, tone_conf:ToneConf):
+        '''Configure DDS using `ToneConf` class.
+
+        Parameter
+        ---------
+        tone_conf : ToneConf
+            Tone configuration.
+        '''
+        self.set_freqs(tone_conf.freq_mult)
+        self.set_amps(tone_conf.amp_mult)
+        self.set_phases(tone_conf.phase_mult)
