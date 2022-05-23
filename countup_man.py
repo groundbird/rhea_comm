@@ -85,8 +85,8 @@ class CountupMan(RawSetting):
             Value of `wrong_data` in the `countup_man` core
         '''
 
-        lsb = self._read_reg(CMAN_COUNTER_LSB)
-        msb = self._read_reg(CMAN_COUNTER_MSB)
+        lsb = self._read_reg(CMAN_WRONG_DATA_LSB)
+        msb = self._read_reg(CMAN_WRONG_DATA_MSB)
 
         return (msb << 8) + lsb
 

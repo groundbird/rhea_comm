@@ -206,7 +206,7 @@ class RBCP:
         '''
         if isinstance(data, int):
             is_read = True
-            payload = ''
+            payload = b''
             length = data
         else:
             is_read = False
