@@ -146,7 +146,7 @@ class RBCP:
         # make socket
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.connect((ip_address, port_num))
-        self.sock.settimeout(0.1)
+        self.sock.settimeout(1)
 
     def __push(self, buff):
         error_cnt = 0
@@ -259,7 +259,7 @@ class RBCP:
                 retry_cnt += 1
                 if retry_cnt > self._retry_max:
                     raise RBCPError from err
-
+                print(err)
                 print(f"rbcp.write: error! retry: {retry_cnt}", file=stderr)
                 sleep(0.1)
                 continue
@@ -291,6 +291,7 @@ class RBCP:
                 retry_cnt += 1
                 if retry_cnt > self._retry_max:
                     raise RBCPError from err
+                print(err)
                 print(f"rbcp.write: error! retry: {retry_cnt}", file=stderr)
                 sleep(0.1)
                 continue
