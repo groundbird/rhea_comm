@@ -121,8 +121,8 @@ def measure_trg(fpga:FPGAControl, tone_conf:ToneConf, data_length,
 
         if end is not None:
             if end < datetime.now(tz=JST):
-                fpga.iq.iq_off()
-                fpga.dac.txenable_off()
+                fpga.iq_setting.iq_off()
+                fpga.dac_setting.txenable_off()
                 return
 
         sleep(1)
