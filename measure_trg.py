@@ -6,6 +6,7 @@ from pathlib import Path
 
 from math    import floor
 from struct  import pack
+from datetime import datetime, timezone, timedelta
 from numpy   import mean, std
 
 from fpga_control import FPGAControl
@@ -20,6 +21,7 @@ THR_SIGMA_DEFAULT = 3.
 THR_COUNT_DEFAULT = 1
 TRIG_POS_DEFAULT = 100
 
+JST = timezone(timedelta(hours=+9), 'JST')
 
 class TrgError(Exception):
     '''Exception raised in trigger measurement.'''
@@ -28,7 +30,8 @@ class TrgError(Exception):
 ## main
 def measure_trg(fpga:FPGAControl, tone_conf:ToneConf, data_length,
                 thre_sigma, thre_count, rate_ksps,
-                trig_pos, pre_length, fname, verbose=True):
+                trig_pos, pre_length, fname, verbose=True,
+                end=None):
     '''Perform trigger measurement.
     '''
 
@@ -115,6 +118,13 @@ def measure_trg(fpga:FPGAControl, tone_conf:ToneConf, data_length,
             _vprint(cnt)
         else:
             _vprint('.', end='')
+
+        if end is not None:
+            if end < datetime.now(tz=JST):
+                fpga.iq.iq_off()
+                fpga.dac.txenable_off()
+                return
+
         sleep(1)
 
     _vprint('triggerd')

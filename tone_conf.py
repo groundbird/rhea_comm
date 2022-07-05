@@ -94,3 +94,17 @@ class ToneConf:
             brepr += freq_pack * 2
 
         return brepr
+
+    @property
+    def freq_if_megahz(self):
+        '''Frequency in MHz.'''
+        return [freq/1e6 for freq in self.freq_if]
+
+    def __add__(self, freq_megahz):
+        freq = [freq_curr + freq_megahz for freq_curr in self.freq_if_megahz]
+
+        return ToneConf(self._max_ch, freq,
+                        phases=self.phases, amps=self.amps, power=self.power)
+
+    def __sub__(self, freq_megahz):
+        return self.__add__(-freq_megahz)
