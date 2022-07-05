@@ -141,7 +141,7 @@ class TrgSetting(RawSetting):
 
         for i, thr_val in enumerate(val_range):
             assert isinstance(thr_val, int), 'set_threshold: min/max_val should be int.'
-            assert TRG_THR_MIN <= thr_val <= TRG_PRE_MAX,\
+            assert TRG_THR_MIN <= thr_val <= TRG_THR_MAX,\
             'set_threshold: min/max_val should be 56-bit-int.'
 
             addr  = TRG_THR_BASE
@@ -174,6 +174,9 @@ class TrgSetting(RawSetting):
         ret = [0, 0, 0, 0]
         for i in range(4):
             addr  = TRG_THR_BASE
+            addr += (channel << 8)
+            addr += ((i+1) << 4)
+            
             ret[i] = self._read_n(8, addr, signed=True)
 
         return [ret[0:2], ret[2:4]]

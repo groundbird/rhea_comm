@@ -16,7 +16,7 @@ class SwpError(Exception):
 
 
 ## main
-def measure_swp(fpga, max_ch, f_start, f_end, f_step, fname, power, verbose=True):
+def measure_swp(fpga:FPGAControl, max_ch, f_start, f_end, f_step, fname, power, verbose=True):
     '''Do frequency sweep measurement.
 
     Parameters
@@ -43,7 +43,7 @@ def measure_swp(fpga, max_ch, f_start, f_end, f_step, fname, power, verbose=True
     _vprint(f'SwpPower: {power:d}/{max_ch:d}')
 
     fpga.init()
-    fpga.iq.set_read_width(1)
+    fpga.iq_setting.set_read_width(1)
     cnt_finish = packet_size(1) * 10
 
     file_desc = open(fname, 'wb')
@@ -56,14 +56,14 @@ def measure_swp(fpga, max_ch, f_start, f_end, f_step, fname, power, verbose=True
             cnt = 0
 
             while True:
-                fpga.dds.set_freqs([freq_hz] * power + [0.] * (max_ch - power))
-                fpga.dds.set_amps([1]*max_ch)
-                fpga.iq.time_reset()
-                fpga.iq.iq_on()
+                fpga.dds_setting.set_freqs([freq_hz] * power + [0.] * (max_ch - power))
+                fpga.dds_setting.set_amps([1]*max_ch)
+                fpga.iq_setting.time_reset()
+                fpga.iq_setting.iq_on()
 
                 try:
                     while True:
-                        time = read_packet_in_swp(fpga.tcp.read(packet_size))
+                        time = read_packet_in_swp(fpga.tcp.read(packet_size(1)))
                         if time == 0:
                             break
                     break
@@ -71,7 +71,7 @@ def measure_swp(fpga, max_ch, f_start, f_end, f_step, fname, power, verbose=True
                     print('stop timestamp reset')
                     raise KeyboardInterrupt from err
                 else:
-                    fpga.iq.iq_off()
+                    fpga.iq_setting.iq_off()
                     fpga.tcp.clear()
                     print('... retry read_packet_in_swp()')
                     continue
@@ -96,13 +96,13 @@ def measure_swp(fpga, max_ch, f_start, f_end, f_step, fname, power, verbose=True
                 if cnt >= cnt_finish:
                     break
 
-            fpga.iq.iq_off()
+            fpga.iq_setting.iq_off()
     except KeyboardInterrupt:
         print('stop measurement')
-        fpga.iq.iq_off()
+        fpga.iq_setting.iq_off()
     finally:
         file_desc.close()
-        fpga.dac.txenable_off()
+        fpga.dac_setting.txenable_off()
         print(f'write raw data to {fname}')
 
 
@@ -144,7 +144,7 @@ def main():
     f_step      = args.f_step
     fname       = args.fname
     power       = args.power
-    ip_address  = args.ip
+    ip_address  = args.ip_address
 
     try:
         fpga = FPGAControl(ip_address=ip_address)

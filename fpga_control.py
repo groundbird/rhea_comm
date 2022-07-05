@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 '''Readout controller.'''
-import fcntl
+import platform
 import sys
 import os
 import stat
@@ -24,6 +24,9 @@ from tcp           import TCP
 
 from rhea_pkg import IP_ADDRESS_DEFAULT, TCP_PORT_DEFAULT, RBCP_PORT_DEFAULT
 
+IS_WINDOWS = platform.system() == 'Windows'
+
+
 class FPGAControl:
     '''FPGA integrated controller.
 
@@ -41,19 +44,21 @@ class FPGAControl:
 
         ## lock file
         try:
-            if not os.path.isfile(self.__lock_path):
-                self.__lockf = open(self.__lock_path, 'a', encoding='utf-8')
-                self.__lockf.close()
-                os.chmod(self.__lock_path,
-                         mode=stat.S_IRUSR |\
-                              stat.S_IWUSR |\
-                              stat.S_IRGRP |\
-                              stat.S_IWGRP |\
-                              stat.S_IROTH |\
-                              stat.S_IWOTH) # chmod 666
+            if not IS_WINDOWS:
+                import fcntl
+                if not os.path.isfile(self.__lock_path):
+                    self.__lockf = open(self.__lock_path, 'a', encoding='utf-8')
+                    self.__lockf.close()
+                    os.chmod(self.__lock_path,
+                            mode=stat.S_IRUSR |\
+                                stat.S_IWUSR |\
+                                stat.S_IRGRP |\
+                                stat.S_IWGRP |\
+                                stat.S_IROTH |\
+                                stat.S_IWOTH) # chmod 666
 
-            self.__lockf = open(self.__lock_path, 'a', encoding='utf-8')
-            fcntl.lockf(self.__lockf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.__lockf = open(self.__lock_path, 'a', encoding='utf-8')
+                fcntl.lockf(self.__lockf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except IOError as err:
             print(f"{self.__lock_path} is locked.")
             print(err)
@@ -64,7 +69,7 @@ class FPGAControl:
         self.tcp = TCP(ip_address=ip_address, port_num=TCP_PORT_DEFAULT)
 
         self.info = InfoSetting(self.rbcp, verbose=verbose)
-        self.max_ch  = self.info.max_ch
+        self.max_ch = self.info.max_ch
         self.en_snap = self.info.en_snap
         self.trig_ch = self.info.trig_ch
 

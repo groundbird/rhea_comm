@@ -20,7 +20,7 @@ class TODError(Exception):
     '''Raised when error happens during TOD measurement.'''
 
 ## main
-def measure_tod(fpga, max_ch, dds_f_megahz, data_length,
+def measure_tod(fpga:FPGAControl, max_ch, dds_f_megahz, data_length,
                 rate_ksps, power, fname, amps=None, phases=None, verbose=True):
     '''Measure time-ordered data.
 
@@ -57,7 +57,7 @@ def measure_tod(fpga, max_ch, dds_f_megahz, data_length,
     if phases is None:
         phases = [0.]*len(dds_f_megahz)
 
-    fpga.iq.set_read_width(len(dds_f_megahz))
+    fpga.iq_setting.set_read_width(len(dds_f_megahz))
 
     if power < 0:
         dds_f_hz_multi  = [freq * 1e6 for freq in dds_f_megahz]
@@ -66,7 +66,7 @@ def measure_tod(fpga, max_ch, dds_f_megahz, data_length,
         dds_f_hz_multi = [freq * 1e6 for freq in dds_f_megahz] * int(power)
         dds_f_hz_multi += [0.] * (max_ch - len(dds_f_hz_multi))
 
-    fpga.dds.set_freqs(dds_f_hz_multi)
+    fpga.dds_setting.set_freqs(dds_f_hz_multi)
 
     if amps is not None:
         if power < 0:
@@ -76,7 +76,7 @@ def measure_tod(fpga, max_ch, dds_f_megahz, data_length,
             amp_multi = list(amps) * int(power)
             amp_multi += [0.] * (max_ch - len(amp_multi))
 
-        fpga.dds.set_amps(amp_multi)
+        fpga.dds_setting.set_amps(amp_multi)
 
     if phases is not None:
         if power<0:
@@ -86,14 +86,14 @@ def measure_tod(fpga, max_ch, dds_f_megahz, data_length,
             phase_multi = list(phases) * int(power)
             phase_multi += [0.] * (max_ch - len(phase_multi))
 
-        fpga.dds.set_phases(phase_multi)
+        fpga.dds_setting.set_phases(phase_multi)
 
 
     _vprint('INPUT list of freq, amp, phase')
     for i, freq in enumerate(dds_f_megahz):
         _vprint(f'ch{i:03d}: freq {freq:7.4f}MHz, amp {amps[i]:.4f}, phase {phases[i]:7.4f}rad ')
 
-    fpga.ds.set_rate(floor(200000 / rate_ksps+0.5))
+    fpga.ds_setting.set_accum(floor(200000 / rate_ksps+0.5))
 
     file_desc = open(fname, 'wb')
 
@@ -121,7 +121,7 @@ def measure_tod(fpga, max_ch, dds_f_megahz, data_length,
     buffsize = 1024 if buffsize < 1024 else int(buffsize)
 
     fpga.tcp.clear()
-    fpga.iq.iq_on()
+    fpga.iq_setting.iq_on()
 
     try:
         while True:
@@ -134,7 +134,7 @@ def measure_tod(fpga, max_ch, dds_f_megahz, data_length,
             cnt += len(buff)
 
             while cnt >= cnt_print:
-                _vprint(cnt_print / packet_size)
+                _vprint(cnt_print / psize)
                 cnt_print += cnt_step
 
             if cnt >= cnt_finish:
@@ -144,8 +144,8 @@ def measure_tod(fpga, max_ch, dds_f_megahz, data_length,
         print('stop measurement')
     finally:
         file_desc.close()
-        fpga.iq.iq_off()
-        fpga.dac.txenable_off()
+        fpga.iq_setting.iq_off()
+        fpga.dac_setting.txenable_off()
         _vprint(f'write raw data to {fname}')
 
 
@@ -206,7 +206,7 @@ def main():
     power       = args.power
     amps        = args.amplitude
     phases      = args.phase
-    ip_address  = args.ip
+    ip_address  = args.ip_address
 
     try:
         fpga = FPGAControl(ip_address=ip_address)

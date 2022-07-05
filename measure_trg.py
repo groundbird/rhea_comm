@@ -47,17 +47,17 @@ def measure_trg(fpga:FPGAControl, tone_conf:ToneConf, data_length,
         _vprint(f'ch{i:03d}: {freq} MHz')
 
     fpga.init()
-    fpga.iq.set_read_width(tone_conf.n_tone)
+    fpga.iq_setting.set_read_width(tone_conf.n_tone)
 
     fpga.dds_setting.configure(tone_conf)
 
-    fpga.ds_setting.set_rate(floor(200000 / rate_ksps+0.1))
+    fpga.ds_setting.set_accum(floor(200000 / rate_ksps+0.1))
     fpga.trg_setting.set_trig_pos(trig_pos)
 
     ## make dummpy packet
     dummy_packet  = b'\xff'
     dummy_packet += b'\x00' + pack('>I', rate_ksps * 1000)
-    dummy_packet += tone_conf.freq_repr()
+    dummy_packet += tone_conf.freq_repr
     dummy_packet += b'\xee'
 
     ## pre-measurement
@@ -67,7 +67,7 @@ def measure_trg(fpga:FPGAControl, tone_conf:ToneConf, data_length,
 
     _vprint('pre-measurement')
     fpga.tcp.clear()
-    fpga.iq.iq_on()
+    fpga.iq_setting.iq_on()
 
     data_stock = [0 for i in range(pre_length)]
     cnt = 0
@@ -77,7 +77,7 @@ def measure_trg(fpga:FPGAControl, tone_conf:ToneConf, data_length,
         _, data, _, _ = read_iq_packet(fpga.tcp.read(psize))
         data_stock[i] = data
 
-    fpga.iq.iq_off()
+    fpga.iq_setting.iq_off()
 
     _vprint(f'read {cnt:d} events')
     data_stock = list(zip(*data_stock[0:cnt]))
@@ -108,11 +108,11 @@ def measure_trg(fpga:FPGAControl, tone_conf:ToneConf, data_length,
     ## get trigger event
     _vprint('main-measurement')
     fpga.tcp.clear()
-    fpga.trg.start()
+    fpga.trg_setting.start()
 
     _vprint('wait trigger')
     cnt = 0
-    while fpga.trg.state() == 1:
+    while fpga.trg_setting.state() == 1:
         cnt += 1
         if cnt % 10 == 0:
             _vprint(cnt)
@@ -133,7 +133,7 @@ def measure_trg(fpga:FPGAControl, tone_conf:ToneConf, data_length,
     file_desc.write(dummy_packet)
 
     cnt = 0
-    cnt_finish = packet_size * data_length
+    cnt_finish = psize * data_length
 
     while True:
         buff = fpga.tcp.read(min(1024, cnt_finish - cnt))
@@ -145,8 +145,8 @@ def measure_trg(fpga:FPGAControl, tone_conf:ToneConf, data_length,
             break
 
     file_desc.close()
-    fpga.iq.iq_off()
-    fpga.dac.txenable_off()
+    fpga.iq_setting.iq_off()
+    fpga.dac_setting.txenable_off()
 
     _vprint(f'Write raw data to {fname}')
 
@@ -185,7 +185,12 @@ def main():
                         default=RATE_KSPS_DEFAULT,
                         help='Sampling rate in kHz.')
 
-    parser.add_argument('-p', '--position',
+    parser.add_argument('-p', '--power',
+                        type=int,
+                        default=1,
+                        help='# of ch used for each comm.(<= max_ch in FPGA). default=1')
+
+    parser.add_argument('--position',
                         type=int,
                         default=TRIG_POS_DEFAULT,
                         help='Trigger position.')
@@ -237,7 +242,7 @@ def main():
     if 200000 % args.rate != 0:
         raise TrgError('Sampling rate (kHz) should divide 200000 evenly.')
 
-    if fname is None:
+    if args.fname is None:
         fname  = 'tod_trg'
 
         for freq in dds_f_megahz:
@@ -245,6 +250,8 @@ def main():
 
         fname += strftime('_%Y-%m%d-%H%M%S')
         fname += '.rawdata'
+    else:
+        fname = args.fname
 
     fname = Path(fname)
 

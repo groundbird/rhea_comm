@@ -14,7 +14,7 @@ class MulswpError(Exception):
     '''Exception raised by mulsweep function.'''
 
 ## main
-def measure_mulswp(fpga, max_ch, dds_f_megahz, width, step, fname,
+def measure_mulswp(fpga:FPGAControl, max_ch, dds_f_megahz, width, step, fname,
                    power, amps=None, phases=None, f_off=None, verbose=True):
     '''Perform multi-channel sweep.
 
@@ -90,7 +90,7 @@ def measure_mulswp(fpga, max_ch, dds_f_megahz, width, step, fname,
 
     fpga.init()
     print(f'Input len: {input_len}')
-    fpga.iq.set_read_width(input_len)
+    fpga.iq_setting.set_read_width(input_len)
 
     file_desc = open(fname, 'wb')
     fpga.tcp.clear()
@@ -111,11 +111,11 @@ def measure_mulswp(fpga, max_ch, dds_f_megahz, width, step, fname,
             cnt = 0
 
             while True:
-                fpga.dds.set_freqs(input_freqs)
-                fpga.dds.set_amps(amp_multi)
-                fpga.dds.set_phases(phase_multi)
-                fpga.iq.time_reset()
-                fpga.iq.iq_on()
+                fpga.dds_setting.set_freqs(input_freqs)
+                fpga.dds_setting.set_amps(amp_multi)
+                fpga.dds_setting.set_phases(phase_multi)
+                fpga.iq_setting.time_reset()
+                fpga.iq_setting.iq_on()
 
                 try:
                     while True:
@@ -127,7 +127,7 @@ def measure_mulswp(fpga, max_ch, dds_f_megahz, width, step, fname,
                     _vprint('stop reset timestamp')
                     raise KeyboardInterrupt from err
                 else:
-                    fpga.iq.iq_off()
+                    fpga.iq_setting.iq_off()
                     fpga.tcp.clear()
                     _vprint('... retry read_packet_in_swp()')
 
@@ -154,14 +154,14 @@ def measure_mulswp(fpga, max_ch, dds_f_megahz, width, step, fname,
                 if cnt >= cnt_finish:
                     break
 
-            fpga.iq.iq_off()
+            fpga.iq_setting.iq_off()
 
     except KeyboardInterrupt:
         _vprint('stop measurement')
-        fpga.iq.iq_off()
+        fpga.iq_setting.iq_off()
     finally:
         file_desc.close()
-        fpga.dac.txenable_off()
+        fpga.dac_setting.txenable_off()
         print(f'write raw data to {fname}')
 
 
@@ -193,7 +193,7 @@ def main():
 
     parser.add_argument('-s', '--step',
                         type=float,
-                        default=0.001,
+                        default=0.01,
                         help='frequency step in MHz. default=0.01')
 
     parser.add_argument('-o', '--offreso_tone',
@@ -251,7 +251,7 @@ def main():
             fname += strftime('_%Y-%m%d-%H%M%S')
             fname += '.rawdata'
         if isfile(fname):
-            raise MulswpError(f'{fname} is existed.')
+            raise MulswpError(f'{fname} exists.')
         if amps is not None and len(amps) != len(dds_f_megahz):
             raise MulswpError('# of input amp must be same as # of input freqs.')
         if phases is not None and len(phases) != len(dds_f_megahz):

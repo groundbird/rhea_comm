@@ -212,10 +212,10 @@ class DacSetting(RawSetting):
         force_reset : bool, optional
             Force reset if True.
         '''
-        if (not force_reset) and self.flag_testmode:
+        if (not force_reset) and (self.flag_testmode == on_off):
             return
 
-        self.flag_testmode = True
+        self.flag_testmode = on_off
         cfg1 = self.read_reg(0x01)
         cfg1 = (cfg1 | 0x04) if on_off else (cfg1 & 0xfb)
         self.write_reg(0x01, cfg1)
