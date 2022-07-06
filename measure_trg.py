@@ -66,15 +66,29 @@ def measure_trg(fpga:FPGAControl, tone_conf:ToneConf, data_length,
     cnt_finish = psize * pre_length
 
     _vprint('pre-measurement')
-    fpga.tcp.clear()
-    fpga.iq_setting.iq_on()
 
     data_stock = [0 for i in range(pre_length)]
     cnt = 0
 
+    readlen = psize*pre_length
+    
+    errcnt = 0
+    while True:
+        fpga.tcp.clear()
+        fpga.iq_setting.iq_on()
+        if errcnt > 10:
+            raise Exception('too many error')
+        try:
+            rawdata = fpga.tcp.read(readlen)
+            if len(rawdata) == readlen:
+                break
+        except Exception as err:
+            print(err)
+            errcnt += 1
+
     for i in range(pre_length):
         cnt = i
-        _, data, _, _ = read_iq_packet(fpga.tcp.read(psize))
+        _, data, _, _ = read_iq_packet(rawdata[psize*i:psize*(i+1)])
         data_stock[i] = data
 
     fpga.iq_setting.iq_off()
@@ -123,6 +137,7 @@ def measure_trg(fpga:FPGAControl, tone_conf:ToneConf, data_length,
             if end < datetime.now(tz=JST):
                 fpga.iq_setting.iq_off()
                 fpga.dac_setting.txenable_off()
+                fpga.tcp.clear()
                 return
 
         sleep(1)

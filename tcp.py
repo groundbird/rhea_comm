@@ -26,12 +26,13 @@ class TCP:
 
     def __pull(self, length):
         error_cnt = 0
+        tmplen = min(length, self.buff_size)
         while error_cnt < self.error_try_count:
             if len(self.read_buff) >= length:
                 break
             error_cnt += 1
             try:
-                self.read_buff += self.sock.recv(self.buff_size)
+                self.read_buff += self.sock.recv(tmplen)
                 error_cnt = 0
             except socket.timeout:
                 pass
@@ -66,10 +67,12 @@ class TCP:
         '''
         try:
             buff = self.__pull(length)
-        except TCPError:
+        except TCPError as err:
+            print(err)
             buff = self.read_buff
             self.read_buff = b''
-        except TypeError:
+        except TypeError as err:
+            print(err)
             buff = self.read_buff
             self.read_buff = b''
 
