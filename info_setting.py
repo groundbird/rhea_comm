@@ -1,47 +1,59 @@
 #!/usr/bin/env python3
 # coding: utf-8
+'''Retrieve information stored in the firmware.'''
 
-from raw_setting import raw_setting
+from raw_setting import RawSetting
 
-class info_setting(raw_setting):
+INFO_FIRM_VER = 0x00000000
+INFO_MAX_CH   = 0x00000010
+INFO_EN_SNAP  = 0x00000011
+INFO_TRIG_CH  = 0x00000012
+
+class InfoSetting(RawSetting):
+    '''Class to retrieve information stored in the firmware.'''
     def __init__(self, rbcp_ins, verbose = True):
-        raw_setting.__init__(self, rbcp_ins, verbose, 'INF')
-        pass
+        RawSetting.__init__(self, rbcp_ins, verbose, 'INF')
 
-    def get_version(self):
-        try:
-            ret = self._read4(0x00000000)
-        except:
-            ret = 0
-            pass
-        return ret
+    @property
+    def version(self):
+        '''Firmware version.
 
-    def get_max_ch(self):
-        try:
-            ret = self._read(0x00000010)
-        except:
-            ret = 2
-            pass
-        return ret
+        Returns
+        -------
+        version : int
+            Firmware version.
+        '''
+        return self._read4(INFO_FIRM_VER)
 
-    def get_en_snap(self):
-        try:
-            ret = (self._read(0x00000011) == 1)
-        except:
-            ret = True
-            pass
-        return ret
+    @property
+    def max_ch(self):
+        '''Number of DDS channels.
 
-    def get_trig_ch(self):
-        ret = None
-        try:
-            ret = self._read(0x00000012)
-        except:
-            if self.get_version() >= 2016091600:
-                ret = self.get_max_ch()
-            else:
-                ret = 0
-            pass
-        return ret
+        Returns
+        -------
+        max_ch : int
+            Number of DDS channels.
+        '''
+        return self._read(INFO_MAX_CH)
 
-    pass
+    @property
+    def en_snap(self):
+        '''Snapshot enabled or not
+
+        Returns
+        -------
+        en_snap : bool
+            True if snapshot enabled.
+        '''
+        return bool(self._read(INFO_EN_SNAP))
+
+    @property
+    def trig_ch(self):
+        '''Number of trigger channel.
+
+        Returns
+        -------
+        trig_ch : int
+            Number of trigger enabled channels.
+        '''
+        return self._read(INFO_TRIG_CH)

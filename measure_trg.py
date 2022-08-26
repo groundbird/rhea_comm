@@ -1,221 +1,292 @@
 #!/usr/bin/env python3
+'''Trigger measurement.'''
+from argparse import ArgumentParser
+from time import strftime, sleep
+from pathlib import Path
 
+from math    import floor
+from struct  import pack
+from datetime import datetime, timezone, timedelta
+from numpy   import mean, std
 
-## config
-rate_kSPS_default   = 1 # 1 kSPS ~ downsample:200000
-premea_leng_default = 10000
-data_length_default = 1024
-thre_sigma_default  = 3.
-thre_count_default  = 1
-trig_pos_default    = 100
+from fpga_control import FPGAControl
+from rhea_pkg import RATE_KSPS_DEFAULT, IP_ADDRESS_DEFAULT
+from packet_reader import read_iq_packet
+from tone_conf import ToneConf
+from common import packet_size
 
+PREMEAN_LEN_DEFAULT = 10000
+DATA_LEN_DEFAULT = 1024
+THR_SIGMA_DEFAULT = 3.
+THR_COUNT_DEFAULT = 1
+TRIG_POS_DEFAULT = 100
 
-## constant
-from fpga_control import fpga_control
-fpga = fpga_control()
-MAX_CH = fpga.MAX_CH
-TRIG_CH = fpga.TRIG_CH
+JST = timezone(timedelta(hours=+9), 'JST')
 
+class TrgError(Exception):
+    '''Exception raised in trigger measurement.'''
 
-## check firmware
-from sys import stderr
-if not TRIG_CH > 0:
-    print(f'Firmware version: {fpga.info.get_version()}', file=stderr)
-    print('Trigger function is disable!', file=stderr)
-    exit(1)
-    pass
 
 ## main
-def measure_trg(dds_f_MHz, data_length, thre_sigma, thre_count, rate_kSPS, trig_pos, pre_length, fname):
-    from math    import floor
-    from struct  import pack
-    from time    import sleep
-    from numpy   import mean, std
-    from packet_reader import read_iq_packet
+def measure_trg(fpga:FPGAControl, tone_conf:ToneConf, data_length,
+                thre_sigma, thre_count, rate_ksps,
+                trig_pos, pre_length, fname, verbose=True,
+                end=None):
+    '''Perform trigger measurement.
+    '''
 
-    print('TRIGGER MEASUREMENT')
-    for i, freq in enumerate(dds_f_MHz):
-        print(f'ch{i:03d}: {freq} MHz')
-        pass
+    def _vprint(*pargs, **pkwargs):
+        if verbose:
+            print(*pargs, **pkwargs)
+
+    _vprint('TRIGGER MEASUREMENT')
+
+    dds_f_megahz = [freq/1e6 for freq in tone_conf.freq_if]
+
+    for i, freq in enumerate(dds_f_megahz):
+        _vprint(f'ch{i:03d}: {freq} MHz')
 
     fpga.init()
-    fpga.iq.set_read_width(len(dds_f_MHz))
-    dds_f_Hz_multi  = [freq * 1e6 for freq in dds_f_MHz]
-    dds_f_Hz_multi *= floor(float(MAX_CH) / float(len(dds_f_MHz))+0.5)
-    fpga.dds.set_freqs(dds_f_Hz_multi)
-    fpga.ds.set_rate(floor(200000 / rate_kSPS+0.1))
-    fpga.trg.set_trig_pos(trig_pos)
+    fpga.iq_setting.set_read_width(tone_conf.n_tone)
+
+    fpga.dds_setting.configure(tone_conf)
+
+    fpga.ds_setting.set_accum(floor(200000 / rate_ksps+0.1))
+    fpga.trg_setting.set_trig_pos(trig_pos)
 
     ## make dummpy packet
     dummy_packet  = b'\xff'
-    dummy_packet += b'\x00' + pack('>I', rate_kSPS * 1000)
-    for freq in dds_f_MHz:
-        freq_Hz = int(floor(freq * 1e6 + 0.5))
-        freq_packet = (b'\x00' * 3) if freq_Hz >= 0 else (b'\xff' * 3)
-        freq_packet += pack('>i', freq_Hz)
-        dummy_packet += freq_packet * 2
-        pass
+    dummy_packet += b'\x00' + pack('>I', rate_ksps * 1000)
+    dummy_packet += tone_conf.freq_repr
     dummy_packet += b'\xee'
 
     ## pre-measurement
     cnt = 0
-    packet_size = 7 + 7 * 2 * len(dds_f_MHz)
-    cnt_finish = packet_size * pre_length
+    psize = packet_size(tone_conf.n_tone)
+    cnt_finish = psize * pre_length
 
-    print('pre-measurement')
-    fpga.tcp.clear()
-    fpga.iq.iq_on()
+    _vprint('pre-measurement')
 
     data_stock = [0 for i in range(pre_length)]
     cnt = 0
-    try:
-        for i in range(pre_length):
-            cnt = i
-            time, data = read_iq_packet(fpga.tcp.read(packet_size))
-            data_stock[i] = data
-            pass
-    except:
-        if cnt == 0:
-            print('no data...')
-            exit(1)
-        pass
-    fpga.iq.iq_off()
 
-    print(f'read {cnt:d} events')
+    readlen = psize*pre_length
+    
+    errcnt = 0
+    while True:
+        fpga.tcp.clear()
+        fpga.iq_setting.iq_on()
+        if errcnt > 10:
+            raise Exception('too many error')
+        try:
+            rawdata = fpga.tcp.read(readlen)
+            if len(rawdata) == readlen:
+                break
+        except Exception as err:
+            print(err)
+            errcnt += 1
+
+    for i in range(pre_length):
+        cnt = i
+        _, data, _, _ = read_iq_packet(rawdata[psize*i:psize*(i+1)])
+        data_stock[i] = data
+
+    fpga.iq_setting.iq_off()
+
+    _vprint(f'read {cnt:d} events')
     data_stock = list(zip(*data_stock[0:cnt]))
     mean_set  = [mean(d) for d in data_stock]
     sigma_set = [std(d)  for d in data_stock]
-    print('min:', end=' ')
-    for m, s in zip(mean_set, sigma_set): print(int(m - thre_sigma * s), end=' ')
-    print()
-    print('max:', end=' ')
-    for m, s in zip(mean_set, sigma_set): print(int(m + thre_sigma * s), end=' ')
-    print()
+    _vprint('min:', end=' ')
+    for _m, _s in zip(mean_set, sigma_set):
+        _vprint(int(_m - thre_sigma * _s), end=' ')
+
+    _vprint()
+    _vprint('max:', end=' ')
+    for _m, _s in zip(mean_set, sigma_set):
+        _vprint(int(_m + thre_sigma * _s), end=' ')
+    _vprint()
 
     ## set threshold
     for i in range(floor(len(mean_set)/2)):
-        Imean,  Qmean  = mean_set [2*i:2*i+2]
-        Isigma, Qsigma = sigma_set[2*i:2*i+2]
-        Imin = int(Imean - thre_sigma * Isigma)
-        Imax = int(Imean + thre_sigma * Isigma)
-        Qmin = int(Qmean - thre_sigma * Qsigma)
-        Qmax = int(Qmean + thre_sigma * Qsigma)
-        fpga.trg.set_threshold(i, [Imin, Imax], [Qmin, Qmax], trg_reset = False)
-        pass
-    fpga.trg.set_thre_count(thre_count, trg_reset = True)
+        i_mean,  q_mean  = mean_set [2*i:2*i+2]
+        i_sigma, q_sigma = sigma_set[2*i:2*i+2]
+        i_min = int(i_mean - thre_sigma * i_sigma)
+        i_max = int(i_mean + thre_sigma * i_sigma)
+        q_min = int(q_mean - thre_sigma * q_sigma)
+        q_max = int(q_mean + thre_sigma * q_sigma)
+        fpga.trg_setting.set_threshold(i, [i_min, i_max], [q_min, q_max], trg_reset=False)
+
+    fpga.trg_setting.set_thre_count(thre_count, trg_reset=True)
 
     ## get trigger event
-    print('main-measurement')
+    _vprint('main-measurement')
     fpga.tcp.clear()
-    fpga.trg.start()
+    fpga.trg_setting.start()
 
-    print('wait trigger')
+    _vprint('wait trigger')
     cnt = 0
-    while fpga.trg.state() == 1:
+    while fpga.trg_setting.state() == 1:
         cnt += 1
         if cnt % 10 == 0:
-            print(cnt)
+            _vprint(cnt)
         else:
-            print('.', end='')
-            pass
+            _vprint('.', end='')
+
+        if end is not None:
+            if end < datetime.now(tz=JST):
+                fpga.iq_setting.iq_off()
+                fpga.dac_setting.txenable_off()
+                fpga.tcp.clear()
+                return
+
         sleep(1)
-        pass
 
-    print('triggerd')
+    _vprint('triggerd')
 
-    f = open(fname, 'wb')
-    f.write(dummy_packet)
+    file_desc = open(fname, 'wb')
+    file_desc.write(dummy_packet)
 
     cnt = 0
-    cnt_finish = packet_size * data_length
+    cnt_finish = psize * data_length
 
     while True:
         buff = fpga.tcp.read(min(1024, cnt_finish - cnt))
-        f.write(buff)
-        if not len(buff): break
+        file_desc.write(buff)
+        if len(buff) == 0:
+            break
         cnt += len(buff)
-        if cnt >= cnt_finish: break
-        pass
+        if cnt >= cnt_finish:
+            break
 
-    f.close()
-    fpga.iq.iq_off()
-    fpga.dac.txenable_off()
-    print(f'write raw data to {fname}')
+    file_desc.close()
+    fpga.iq_setting.iq_off()
+    fpga.dac_setting.txenable_off()
 
+    _vprint(f'Write raw data to {fname}')
+
+
+def main():
+    '''Parse arguments and do trigger measurement.'''
+    parser = ArgumentParser()
+
+    parser.add_argument('freqs',
+                        type=float,
+                        nargs='+',
+                        help='list of tone frequencies in MHz.')
+
+    parser.add_argument('-f', '--fname',
+                        type=str,
+                        default=None,
+                        help='output filename. (default=mulswp_WIDTH_STEP_INPUTFREQ_DATE.rawdata)')
+
+    parser.add_argument('-t', '--threshold',
+                        type=float,
+                        default=THR_SIGMA_DEFAULT,
+                        help='Trigger threshold in standard deviation.')
+
+    parser.add_argument('-l', '--length',
+                        type=int,
+                        default=DATA_LEN_DEFAULT,
+                        help='Data length.')
+
+    parser.add_argument('-c', '--count',
+                        type=int,
+                        default=THR_COUNT_DEFAULT,
+                        help='Threshold count.')
+
+    parser.add_argument('-r', '--rate',
+                        type=int,
+                        default=RATE_KSPS_DEFAULT,
+                        help='Sampling rate in kHz.')
+
+    parser.add_argument('-p', '--power',
+                        type=int,
+                        default=1,
+                        help='# of ch used for each comm.(<= max_ch in FPGA). default=1')
+
+    parser.add_argument('--position',
+                        type=int,
+                        default=TRIG_POS_DEFAULT,
+                        help='Trigger position.')
+
+    parser.add_argument('-m', '--pre_length',
+                        type=int,
+                        default=PREMEAN_LEN_DEFAULT,
+                        help='Pre-measurement length to estimate data fluctuation.')
+
+    parser.add_argument('-ip', '--ip_address',
+                        type=str,
+                        default=IP_ADDRESS_DEFAULT,
+                        help='IP-v4 address of target SiTCP. (default=192.168.10.16)')
+
+    parser.add_argument('--amplitude',
+                        type=float,
+                        nargs='+',
+                        default=None,
+                        help='''list of amplitude scale (0 to 1.0).
+                        # of amplitude scale must be same as # of input freqs.''')
+
+    parser.add_argument('--phase',
+                        type=float,
+                        nargs='+',
+                        default=None,
+                        help='''list of phase scale[rad].
+                        # of phase scale must be same as # of input freqs''')
+
+    args = parser.parse_args()
+
+    fpga = FPGAControl()
+    trig_ch = fpga.trig_ch
+
+
+    # Argument validation.
+    if not trig_ch > 0:
+        raise TrgError(f'Firmware version: {fpga.info.version}' +
+                       'Trigger function is disabled!')
+
+    if len(args.freqs) > trig_ch:
+        raise TrgError('Number of tones exceeds capability of the firmware.' +
+                       f'required: {len(args.freq)}/capable: {trig_ch}')
+
+    if len(args.freqs) == 0:
+        raise TrgError('No tones specified.')
+
+    dds_f_megahz = args.freqs
+
+    if 200000 % args.rate != 0:
+        raise TrgError('Sampling rate (kHz) should divide 200000 evenly.')
+
+    if args.fname is None:
+        fname  = 'tod_trg'
+
+        for freq in dds_f_megahz:
+            fname += f'_{freq:+08.3f}MHz'
+
+        fname += strftime('_%Y-%m%d-%H%M%S')
+        fname += '.rawdata'
+    else:
+        fname = args.fname
+
+    fname = Path(fname)
+
+    if fname.exists():
+        raise TrgError(f'{fname:s} exists.')
+
+    tone_conf = ToneConf(fpga.max_ch, dds_f_megahz,
+                         phases=args.phase,
+                         amps=args.amplitude,
+                         power=args.power)
+
+    measure_trg(fpga,
+                tone_conf,
+                args.length,
+                args.threshold,
+                args.count,
+                args.rate,
+                args.position,
+                args.pre_length,
+                fname)
 
 if __name__ == '__main__':
-    ## get argv
-    from sys     import argv, stderr
-    from os.path import isfile
-    from time    import strftime
-
-    try:
-        args = argv[1:]
-        arg_val = []
-        fname = None
-        data_length = data_length_default
-        thre_sigma  = thre_sigma_default
-        thre_count  = thre_count_default
-        rate_kSPS   = rate_kSPS_default
-        trig_pos    = trig_pos_default
-        pre_length  = premea_leng_default
-        while args:
-            if args[0] == '-f':
-                fname = args[1]
-                args = args[2:]
-            elif args[0] == '-l':
-                data_length = int(args[1])
-                args = args[2:]
-            elif args[0] == '-t':
-                thre_sigma = abs(float(args[1]))
-                args = args[2:]
-            elif args[0] == '-c':
-                thre_count = int(args[1])
-                args = args[2:]
-            elif args[0] == '-r':
-                rate_kSPS = int(args[1])
-                args = args[2:]
-            elif args[0] == '-p':
-                trig_pos = int(args[1])
-                args = args[2:]
-            elif args[0] == '-m':
-                pre_length = int(args[1])
-                args = args[2:]
-            else:
-                arg_val += [args[0]]
-                args = args[1:]
-                pass
-            pass
-        if len(arg_val) > TRIG_CH : raise
-        if len(arg_val) == 0      : raise
-        dds_f_MHz = [float(v) for v in arg_val]
-        if 200000 % rate_kSPS != 0: raise
-        if fname == None:
-            fname  = 'tod_trg'
-            for f in dds_f_MHz: fname += f'_{f:+08.3f}MHz'
-            fname += strftime('_%Y-%m%d-%H%M%S')
-            fname += '.rawdata'
-            pass
-        if isfile(fname):
-            print(f'{fname:s} is existed.', file=stderr)
-            raise
-        while len(dds_f_MHz) & (len(dds_f_MHz)-1): dds_f_MHz.append(0.)
-    except:
-        print( 'Usage: measure_trg.py [freq0_MHz] [freq1_MHz] ...', file=stderr)
-        print( '       option: -f [filename]            (mandantory)', file=stderr)
-        print( '                  output filename', file=stderr)
-        print(f'               -l [(int)length]         (default: {data_length_default:d})', file=stderr)
-        print( '                  data length of triggered event (<= 1024)', file=stderr)
-        print(f'               -t [(float)thre(sigma)]  (default: {thre_sigma_default:f})', file=stderr)
-        print( '                  trigger threshold whose unit is standard deviation', file=stderr)
-        print(f'               -c [(int)thre_count]     (defalut: {thre_count_default:d})', file=stderr)
-        print( '                  trigger threshold in time-axis', file=stderr)
-        print(f'               -r [(int)rate(kSPS)]     (defalut: {rate_kSPS_default:d})', file=stderr)
-        print( '                  sample rate of measurement', file=stderr)
-        print(f'               -p [(int)trig_pos]       (defalut: {rate_kSPS_default:d})', file=stderr)
-        print( '                  data length before trigger time (<= data length)', file=stderr)
-        print(f'               -m [(int)length]         (default: {premea_leng_default:d})', file=stderr)
-        print( '                  data length of pre-measurement for estimation of mean/sigma', file=stderr)
-        exit(1)
-
-    measure_trg(dds_f_MHz, data_length, thre_sigma, thre_count, rate_kSPS, trig_pos, pre_length, fname)
+    main()

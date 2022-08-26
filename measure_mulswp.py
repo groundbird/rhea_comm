@@ -1,181 +1,172 @@
 #!/usr/bin/env python3
+'''Perform multi-channel sweep.'''
+from os.path import isfile
+from time    import strftime
+from argparse import ArgumentParser
+import sys
+import numpy as np
 
+from fpga_control  import FPGAControl
+from packet_reader import read_packet_in_swp
+from common import two_div, packet_size
 
-## constant
-from fpga_control  import fpga_control
-
-def two_div(val):
-    if val < 2: return 0;
-    return len(bin(val-1)) -2
+class MulswpError(Exception):
+    '''Exception raised by mulsweep function.'''
 
 ## main
-def measure_mulswp(fpga, MAX_CH, dds_f_MHz, width, step, fname, power, amps = None, phases = None, f_off=None):
-    from packet_reader import read_packet_in_swp
-    from numpy  import arange, floor
-    from struct import pack
-    from time   import sleep
+def measure_mulswp(fpga:FPGAControl, max_ch, dds_f_megahz, width, step, fname,
+                   power, amps=None, phases=None, f_off=None, verbose=True):
+    '''Perform multi-channel sweep.
 
-    if power<0:
-        num_list = floor(float(MAX_CH) / float(len(dds_f_MHz))+0.1)
+    Parameters
+    ----------
+    fpga : FPGAControl
+        FPGA controller.
+    max_ch : int
+        Number of DDS channels in the firmware.
+    dds_f_megahz : list of float
+        Tone frequency list in MHz.
+    width : float
+        Sweep width in MHz.
+    step : float
+        Step frequency in MHz.
+    fname : str
+        File path.
+    power : int
+        Number of DDSes to be used for a tone.
+    amps : list of float, optional
+        Amplitude list (maximum: 1).
+    phases : list of float, optional
+        Initial phase list in radians.
+    f_off : float, optional
+        Frequency of off-resonance measurement in MHz.
+    '''
+    def _vprint(*pargs, **pkwargs):
+        if verbose:
+            print(*pargs, **pkwargs)
+
+    n_tones = len(dds_f_megahz)
+
+    if power < 0:
+        num_list = np.floor(float(max_ch) / float(len(dds_f_megahz))+0.1)
     else:
         num_list = int(power)
 
-    
+    # Amplitude processing
     if amps is None:
-        amps = [1.]*len(dds_f_MHz)
-        for i, freq in enumerate(dds_f_MHz):
-#            print(f'ch{i:03d}: {freq} MHz')
-            pass
+        amps = [1.]*len(dds_f_megahz)
+
+    if power < 0:
+        amp_multi  = list(amps)
+        amp_multi *= num_list
     else:
-        for i, freq in enumerate(dds_f_MHz):
-#            print(f'ch{i:03d}: {freq} MHz, scaled by amp')
-            pass
+        amp_multi = list(amps) * num_list
+        amp_multi += [0.] * (max_ch - len(amp_multi))
 
-    if amps is not None:
-        if power<0:
-            amp_multi  = [amp for amp in amps]
-            amp_multi *= num_list
-        else:
-            amp_multi = [amp for amp in amps] * num_list + [0.] * (MAX_CH - len(dds_f_MHz)*num_list)
-#        print("INPUT SCALE LIST")
-#        print(amp_multi)
-        pass
-
-
+    # Phase processing
     if phases is None:
-        phases = [0.]*len(dds_f_MHz)
-        for i, freq in enumerate(dds_f_MHz):
-#            print(f'ch{i:03d}: {freq} MHz')
-            pass
+        phases = [0.]*len(dds_f_megahz)
+
+    if power < 0:
+        phase_multi = list(phases)
+        phase_multi *= num_list
     else:
-        for i, freq in enumerate(dds_f_MHz):
-#            print(f'ch{i:03d}: {freq} MHz, changed by phase')
-            pass
+        phase_multi =  list(phases) * num_list
+        phase_multi += [0.] * (max_ch - len(phase_multi))
 
-    if phases is not None:
-        if power<0:
-            phase_multi = [phase for phase in phases]
-            phase_multi *= num_list
-        else:
-            phase_multi =  [phase for phase in phases] * num_list + [0.] * (MAX_CH - len(dds_f_MHz)*num_list)
+    _vprint('INPUT list of freq, amp, phase')
+    for i, (freq, amp, phase) in enumerate(zip(dds_f_megahz, amp_multi, phase_multi)):
+        _vprint(f'ch{i:03d}: freq {dds_f_megahz[i]:7.4f}MHz, amp {amp:.4f}, phase {phase:7.4f}rad')
 
-#        print("phase list")
-#        print(phase_multi)
-        pass
+    input_len = 2**two_div(n_tones)
+    if f_off is not None:
+        input_len *= 2
 
-## print [freq, amp, phase]
-    print('INPUT list of freq, amp, phase')
-    for i in range(len(dds_f_MHz)):
-        print(f'ch{i:03d}: freq {dds_f_MHz[i]:7.4f}MHz, amp {amps[i]:.4f}, phase {phases[i]:7.4f}rad')
+    psize = packet_size(input_len)
+    cnt_finish = 10 * psize
 
-
-
-    input_len = 2**two_div(len(dds_f_MHz)+(1 if f_off is not None else 0))
-    packet_size = 7 + 7 * input_len * 2
-    cnt_finish = 10 * packet_size
-    header_list = [0xff, 0xf5]
-
-    print('MULTI-SWEEP MEASUREMENT')
-    print(f'SwpPower: {power:d}*{input_len}/{MAX_CH:d}')
-    sleep(1)
+    _vprint('MULTI-SWEEP MEASUREMENT')
+    _vprint(f'SwpPower: {power:d}*{input_len}/{max_ch:d}')
 
     fpga.init()
     print(f'Input len: {input_len}')
-    fpga.iq.set_read_width(input_len)
+    fpga.iq_setting.set_read_width(input_len)
 
-    f = open(fname, 'wb')
+    file_desc = open(fname, 'wb')
     fpga.tcp.clear()
 
-    dfs = arange(-width/2, width/2, step)
+    dfreqs = np.arange(-width/2, width/2, step)
 
     try:
-        for df in dfs:
-            print(f'{df:8.3f} MHz')
-            freq_Hzs = [int(floor((freq+df) * 1e6 + 0.5)) for freq in dds_f_MHz]
-            if power<0:
-                input_freqs = freq_Hzs * num_list
+        for dfreq in dfreqs:
+            _vprint(f'{dfreq:8.3f} MHz')
+            freq_hzs = [int(np.floor((freq+dfreq) * 1e6 + 0.5)) for freq in dds_f_megahz]
+
+            if power < 0:
+                input_freqs = freq_hzs * num_list
             else:
-                input_freqs = freq_Hzs * num_list + [0.] * (MAX_CH - len(dds_f_MHz)*num_list)
-#            if f_off is not None:
-#                freq_Hzs += [int(floor(f_off* 1e6 +  0.5))]
-#            while len(freq_Hzs) != input_len:
-#                freq_Hzs.append(int(0.))
+                input_freqs = freq_hzs * num_list
+                input_freqs += [0]*(max_ch - len(input_freqs))
+
             cnt = 0
 
             while True:
-                input_freqs = freq_Hzs * power + [0] * (MAX_CH - power*input_len)
-#               print('Power: %d*%d/%d' % (power, len(dds_f_MHz), MAX_CH))
-                fpga.dds.set_freqs(input_freqs)
-                fpga.dds.set_amps(amp_multi)
-                fpga.dds.set_phases(phase_multi)
-                fpga.iq.time_reset()
-                fpga.iq.iq_on()
+                fpga.dds_setting.set_freqs(input_freqs)
+                fpga.dds_setting.set_amps(amp_multi)
+                fpga.dds_setting.set_phases(phase_multi)
+                fpga.iq_setting.time_reset()
+                fpga.iq_setting.iq_on()
 
                 try:
                     while True:
-                        time = read_packet_in_swp(fpga.tcp.read(packet_size))
-                        if time == 0: break
-                        pass
+                        time = read_packet_in_swp(fpga.tcp.read(psize))
+                        if time == 0:
+                            break
                     break
-                except KeyboardInterrupt:
-                    print('stop reset timestamp')
-                    raise KeyboardInterrupt
+                except KeyboardInterrupt as err:
+                    _vprint('stop reset timestamp')
+                    raise KeyboardInterrupt from err
                 else:
-                    fpga.iq.iq_off()
+                    fpga.iq_setting.iq_off()
                     fpga.tcp.clear()
-                    print('... retry read_packet_in_swp()')
-                    continue
-                pass
+                    _vprint('... retry read_packet_in_swp()')
 
-#            freq_packs = [(b'\x00' * 3) if freq >= 0 else (b'\xff' * 3) for freq in freq_Hzs]
-#            freq_packs = [freq_packs[i] + pack('>i', freq) for i, freq in enumerate(freq_Hzs)]
-            freq_packs = [(b'\x00' * 3) if freq >= 0 else (b'\xff' * 3) for freq in freq_Hzs]
-#            print(freq_packs)
-            freq_packs = [freq_packs[i] + pack('>i', freq) for i, freq in enumerate(freq_Hzs)]
-  
+            freq_packs = [int(freq_hz).to_bytes(7, byteorder='big', signed=True) \
+                          for freq_hz in freq_hzs]
+
             dummy_packet  = b'\xff'        # header
             dummy_packet += b'\x00' * 5    # time
-            for fp in freq_packs:
-                dummy_packet += fp * 2     # freq
-                pass
+
+            for freq_pack in freq_packs:
+                dummy_packet += freq_pack * 2     # freq
+
             dummy_packet += b'\xee'        # footer
-            f.write(dummy_packet)
+            file_desc.write(dummy_packet)
 
             while True:
                 buff = fpga.tcp.read(min(1024, cnt_finish - cnt))
-                f.write(buff)
-                if not len(buff): break
+                file_desc.write(buff)
+
+                if len(buff) == 0:
+                    break
+
                 cnt += len(buff)
-                if cnt >= cnt_finish: break
-                pass
+                if cnt >= cnt_finish:
+                    break
 
+            fpga.iq_setting.iq_off()
 
-
-
-
-#                buff = fpga.tcp.read(min(1024, cnt_finish - cnt))
-#                f.write(buff)
-#                if not len(buff): break
-#                cnt += len(buff)
-#                if cnt >= cnt_finish: break
-#                pass
-
-            fpga.iq.iq_off()
-            pass
     except KeyboardInterrupt:
-        print('stop measurement')
-        fpga.iq.iq_off()
+        _vprint('stop measurement')
+        fpga.iq_setting.iq_off()
     finally:
-        f.close()
-        fpga.dac.txenable_off()
+        file_desc.close()
+        fpga.dac_setting.txenable_off()
         print(f'write raw data to {fname}')
-        pass
 
-if __name__ == '__main__':
-    from os.path import isfile
-    from time    import strftime
-    from argparse import ArgumentParser
 
+def main():
+    '''Parse arguments and perform multi-tone sweep measurement.'''
     parser = ArgumentParser()
 
     parser.add_argument('fcenters',
@@ -191,23 +182,25 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--power',
                         type=int,
                         default=1,
-                        help=f'# of ch used for each comm.(<= max_ch in FPGA). default=1')
+                        help='# of ch used for each comm.(<= max_ch in FPGA). default=1')
 
     parser.add_argument('-w', '--width',
                         type=float,
                         default=3.0,
-                        help=f'frequency width in MHz(frequency range = freq +/- width/2). default=3.0')
+                        help='frequency width in MHz'+
+                        '(frequency range = freq +/- width/2). default=3.0')
 
 
     parser.add_argument('-s', '--step',
                         type=float,
-                        default=0.001,
-                        help=f'frequency step in MHz. default=0.01')
+                        default=0.01,
+                        help='frequency step in MHz. default=0.01')
 
     parser.add_argument('-o', '--offreso_tone',
                         type=float,
                         default=None,
-                        help=f'off resonance frequency fixed to same value during sweeping. default=None')
+                        help='off resonance frequency fixed to same value during sweeping.'
+                              + ' default=None')
 
     parser.add_argument('--amplitude',
                         type=float,
@@ -230,60 +223,58 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    dds_f_MHz = args.fcenters
-    fname     = args.fname
-    power     = args.power
-    width     = args.width
-    step      = args.step
-    f_off     = args.offreso_tone
-    amps      = args.amplitude
-    phases    = args.phase
-    ip        = args.ip_address
+    dds_f_megahz = args.fcenters
+    fname      = args.fname
+    power      = args.power
+    width      = args.width
+    step       = args.step
+    f_off      = args.offreso_tone
+    amps       = args.amplitude
+    phases     = args.phase
+    ip_address = args.ip_address
 
     try:
-        fpga = fpga_control(ip_address=ip)
-        MAX_CH = fpga.MAX_CH
-    
-        input_len = 2**two_div(len(dds_f_MHz)+(1 if f_off is not None else 0))
-        if power < 1 or power*input_len > MAX_CH:
-            raise Exception(f'exceeding max # of channels = {input_len}*{power} > {MAX_CH}')
-        if fname == None:
+        fpga = FPGAControl(ip_address=ip_address)
+        max_ch = fpga.max_ch
+
+        input_len = 2**two_div(len(dds_f_megahz)+(1 if f_off is not None else 0))
+        if power < 1 or power*input_len > max_ch:
+            raise MulswpError(f'exceeding max # of channels = {input_len}*{power} > {max_ch}')
+        if fname is None:
             fname  = 'mulswp'
             fname += f'_{width:+08.3f}MHzWidth'
             fname += f'_{step:+08.3f}MHzStep'
-            for f_cen in dds_f_MHz:
+            for f_cen in dds_f_megahz:
                 fname += f'_{f_cen:+08.3f}MHz'
             if f_off is not None:
                 fname += f'_{f_off:+08.3f}MHzOffTone'
             fname += strftime('_%Y-%m%d-%H%M%S')
             fname += '.rawdata'
         if isfile(fname):
-            raise Exception(f'{fname} is existed.')
-        if amps is not None and len(amps) != len(dds_f_MHz):
-            raise Exception(f'# of input amp must be same as # of input freqs.')
-        if phases is not None and len(phases) != len(dds_f_MHz):
-            raise Exception(f'# of input phase must be same as # of input freqs.')
+            raise MulswpError(f'{fname} exists.')
+        if amps is not None and len(amps) != len(dds_f_megahz):
+            raise MulswpError('# of input amp must be same as # of input freqs.')
+        if phases is not None and len(phases) != len(dds_f_megahz):
+            raise MulswpError('# of input phase must be same as # of input freqs.')
 
     except TimeoutError:
         print('connection to FAGA failed.')
-        print(ip, 'is invalid ip address.')
-        exit(1)
-        pass
-    except Exception as e:
-        print(e)
-        exit(1)
-        pass
+        print(ip_address, 'is invalid ip address.')
+        sys.exit(1)
+    except MulswpError as err:
+        print(err)
+        sys.exit(1)
 
-    while len(dds_f_MHz) & (len(dds_f_MHz)-1):
-        dds_f_MHz.append(0.)
-        if amps is not None: amps.append(0.)
-        if phases is not None: phases.append(0.)
-        pass
-
+    while len(dds_f_megahz) & (len(dds_f_megahz)-1):
+        dds_f_megahz.append(0.)
+        if amps is not None:
+            amps.append(0.)
+        if phases is not None:
+            phases.append(0.)
 
     measure_mulswp(fpga      = fpga,
-                   MAX_CH    = MAX_CH,
-                   dds_f_MHz = dds_f_MHz,
+                   max_ch    = max_ch,
+                   dds_f_megahz = dds_f_megahz,
                    width     = width,
                    step      = step,
                    fname     = fname,
@@ -292,80 +283,6 @@ if __name__ == '__main__':
                    phases    = phases,
                    f_off     = f_off)
 
-#####
-    ## get argv
-    # from sys     import argv, stderr
 
-    # try:
-    #     args = argv[1:]
-    #     arg_val = []
-    #     fname = None
-    #     power = 1
-    #     width = 3.0 # MHz
-    #     step = 0.01 # MHz
-    #     f_off = None
-    #     ip_addr = '192.168.10.32'
-    #     while args:
-    #         if args[0] == '-f':
-    #             fname = args[1]
-    #             args = args[2:]
-    #         elif args[0] == '-p':
-    #             power = int(args[1])
-    #             args = args[2:]
-    #         elif args[0] == '-w':
-    #             width = float(args[1])
-    #             args = args[2:]
-    #         elif args[0] == '-s':
-    #             step = float(args[1])
-    #             args = args[2:]
-    #         elif args[0] == '-o':
-    #             f_off = float(args[1])
-    #             args = args[2:]
-    #         elif args[0] == '-ip':
-    #             ip_addr = args[1]
-    #             args = args[2:]
-    #         else:
-    #             arg_val += [args[0]]
-    #             args = args[1:]
-    #             pass
-    #         pass
-
-    #     fpga = fpga_control(ip_address=ip_addr)
-    #     MAX_CH = fpga.MAX_CH
-
-    #     input_len = 2**two_div(len(arg_val)+(1 if f_off is not None else 0))
-
-    #     if power < 1 or power*input_len > MAX_CH:
-    #         raise Exception(f'exceeding max # of channels = {input_len}*{power} > {MAX_CH}')
-    #     f_centers   = [float(f_str) for f_str in arg_val]
-    #     if len(f_centers) == 0:
-    #         raise Exception('F center should be specified')
-    #     if fname == None:
-    #         fname  = 'mulswp'
-    #         fname += f'_{width:+08.3f}MHzWidth'
-    #         fname += f'_{step:+08.3f}MHzStep'
-    #         for f_cen in f_centers:
-    #             fname += f'_{f_cen:+08.3f}MHz'
-    #         if f_off is not None:
-    #             fname += f'_{f_off:+08.3f}MHzOffTone'
-    #         fname += strftime('_%Y-%m%d-%H%M%S')
-    #         fname += '.rawdata'
-    #     if isfile(fname):
-    #         raise Exception(f'{fname} is existed.')
-    # except Exception as e:
-    #     print( 'Usage: measure_mulswp.py [(float)freq0_MHz] [(float)freq1_MHz] ...', file=stderr)
-    #     print( '       option: -f [(str)filename] (default: swp_WIDTH_STEP_INPUTFREQ_DATE.rawdata)', file=stderr)
-    #     print( '                  >> output filename', file=stderr)
-    #     print(f'             : -p [(int)num] (default: {power})', file=stderr)
-    #     print(f'                  >> amplitude (<={MAX_CH})', file=stderr)
-    #     print(f'             : -w [(float)width] (default: {width} MHz)', file=stderr)
-    #     print(f'                  >> frequency width (frequency range = freq +/- width/2)', file=stderr)
-    #     print(f'             : -s [(float)step] (default: {step} MHz)', file=stderr)
-    #     print(f'                  >> frequency step', file=stderr)
-    #     print(f'             : -o [(float)off-resonance tone] (default: None)', file=stderr)
-    #     print(f'                  >> off resonance frequency fixed to same value during sweeping', file=stderr)
-    #     print(e)
-    #     exit(1)
-
-    # measure_mulswp(fpga, MAX_CH, f_centers, width, step, fname, power, f_off=f_off)
-
+if __name__ == '__main__':
+    main()

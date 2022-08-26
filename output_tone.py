@@ -9,14 +9,14 @@ data_length_default = rate_kSPS_default * 1000 * 10 # default: 10 sec
 
 
 ## constant
-from fpga_control import fpga_control
+from fpga_control import FPGAControl
 
 ## tool
 def isPowerOf2(value): return value & (value-1)
 
 
 ## main
-def output_tones(fpga, MAX_CH, dds_f_MHz, power, amps=None, phases=None):
+def output_tones(fpga:FPGAControl, MAX_CH, dds_f_MHz, power, amps=None, phases=None):
     from math import floor
 
     print('OUTPUT TONES')
@@ -43,7 +43,7 @@ def output_tones(fpga, MAX_CH, dds_f_MHz, power, amps=None, phases=None):
 
 
     fpga.init()
-    fpga.iq.set_read_width(len(dds_f_MHz))
+    fpga.iq_setting.set_read_width(len(dds_f_MHz))
 
     if power<0:
         dds_f_Hz_multi  = [freq * 1e6 for freq in dds_f_MHz]
@@ -55,7 +55,7 @@ def output_tones(fpga, MAX_CH, dds_f_MHz, power, amps=None, phases=None):
 
 #    print("FREQ LIST")
 #    print(dds_f_Hz_multi)
-    fpga.dds.set_freqs(dds_f_Hz_multi)
+    fpga.dds_setting.set_freqs(dds_f_Hz_multi)
 
     if amps is not None:
         if power<0:
@@ -66,7 +66,7 @@ def output_tones(fpga, MAX_CH, dds_f_MHz, power, amps=None, phases=None):
 
 #        print("SCALE LIST")
 #        print(amp_multi)
-        fpga.dds.set_amps(amp_multi)
+        fpga.dds_setting.set_amps(amp_multi)
 
 
     if phases is not None:
@@ -79,17 +79,17 @@ def output_tones(fpga, MAX_CH, dds_f_MHz, power, amps=None, phases=None):
 
 #        print("phase list")
 #        print(phase_multi)
-        fpga.dds.set_phases(phase_multi)
+        fpga.dds_setting.set_phases(phase_multi)
 
 ## print [freq, amp, phase]
     print('INPUT list of freq, amp, phase')
     for i in range(len(dds_f_MHz)):
         print(f'ch{i:03d}: freq {dds_f_MHz[i]:7.4f}MHz, amp {amps[i]:.4f}, phase {phases[i]:7.4f}rad')
 
-    fpga.ds.set_rate(200000)
+    fpga.ds_setting.set_accum(200000)
 
     fpga.tcp.clear()
-    fpga.iq.iq_on()
+    fpga.iq_setting.iq_on()
     _t = 0
     try:
         while True:
@@ -100,8 +100,8 @@ def output_tones(fpga, MAX_CH, dds_f_MHz, power, amps=None, phases=None):
     except Exception as e:
         print(e)
     finally:
-        fpga.iq.iq_off()
-        fpga.dac.txenable_off()
+        fpga.iq_setting.iq_off()
+        fpga.dac_setting.txenable_off()
         exit(1)
     pass
 
@@ -151,8 +151,8 @@ if __name__ == '__main__':
     phases = args.phase
 
     try:
-        fpga = fpga_control(ip_address=ip)
-        MAX_CH = fpga.MAX_CH
+        fpga = FPGAControl(ip_address=ip)
+        MAX_CH = fpga.max_ch
 
         if len(freqs) > MAX_CH:
             raise Exception(f'# of channel is over max: {MAX_CH}')

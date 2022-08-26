@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 
-from struct import pack, unpack
+from struct import unpack
 from numpy import median
 from sys import stderr
 
-buffsize = 4096
-header = 0xff
-header_sgsync = 0xaa
-header_sync = 0xf5
-footer = 0xee
+BUFFSIZE = 4096
+HEADER_DATA = 0xff
+HEADER_SGSYNC = 0xaa
+HEADER_SYNC = 0xf5
+FOOTER = 0xee
 
-class packet_reader_error(Exception): pass
+class PacketReaderError(Exception):
+    '''Packet reader exception.'''
 
 
 def get_packet_size(filename):
@@ -18,22 +19,22 @@ def get_packet_size(filename):
     offset = 0
 
     f = open(filename, 'rb')
-    buff = f.read(buffsize)
+    buff = f.read(BUFFSIZE)
     f.close()
 
 
-    if buff[0] == header:
+    if buff[0] == HEADER_DATA:
         ret += [0]
     else:
-        raise packet_reader_error('error : get_packet_size.header')
+        raise PacketReaderError('error : get_packet_size.HEADER_DATA')
 
     while True:
-        p = buff.find(footer)
+        p = buff.find(FOOTER)
         if p == len(buff) - 1: break
         if p == -1: break
         buff = buff[p+1:]
         offset += p+1
-        if buff[0] in [header, header_sync]: ret += [offset]
+        if buff[0] in [HEADER_DATA, HEADER_SYNC]: ret += [offset]
         pass
 
     ret_diff = []
@@ -54,21 +55,21 @@ def get_length(filename, packet_size = None):
     cnt = 0
     try:
         while True:
-            buff += f.read(buffsize)
+            buff += f.read(BUFFSIZE)
             if len(buff) < packet_size: break
 
             while True:
-                if buff[0] not in [header, header_sync]:
-                    raise packet_reader_error('error : get_length.header', cnt)
-                if buff[packet_size - 1] != footer:
-                    raise packet_reader_error('error : get_length.footer', cnt)
+                if buff[0] not in [HEADER_DATA, HEADER_SYNC]:
+                    raise PacketReaderError('error : get_length.HEADER_DATA', cnt)
+                if buff[packet_size - 1] != FOOTER:
+                    raise PacketReaderError('error : get_length.FOOTER', cnt)
                 cnt += 1
                 buff = buff[packet_size:]
                 if len(buff) < packet_size: break
                 pass
 
             pass
-    except packet_reader_error as e:
+    except PacketReaderError as e:
         print(e)
         print(f'packet error: {cnt}', file=stderr)
         pass
@@ -81,23 +82,23 @@ def read_packet_in_swp(buff):
     dlen = (len(buff) - 7) / 7
     t = -1
     if len(buff) != dlen * 7 + 7:
-        raise packet_reader_error('error : read_packet_in_swp.size')
-    if buff[0] not in [header, header_sgsync, header_sync]:
-        raise packet_reader_error('error : read_packet_in_swp.header')
-    if buff[-1] != footer:
-        raise packet_reader_error('error : read_packet_in_swp.footer')
-    if buff[0] == header:
+        raise PacketReaderError('error : read_packet_in_swp.size')
+    if buff[0] not in [HEADER_DATA, HEADER_SGSYNC, HEADER_SYNC]:
+        raise PacketReaderError('error : read_packet_in_swp.HEADER_DATA')
+    if buff[-1] != FOOTER:
+        raise PacketReaderError('error : read_packet_in_swp.FOOTER')
+    if buff[0] == HEADER_DATA:
         t = (unpack('b', buff[1:2])[0] << (8 * 4)) + unpack('>I', buff[2:6])[0]
     return t
 
 def read_iq_packet(buff, n_rot = -1, sync_off = 0):
     dlen = (len(buff) - 7) / 7
     if len(buff) != dlen * 7 + 7:
-        raise packet_reader_error('error : read_iq_packet.size')
-    if buff[0] not in [header, header_sgsync]:
-        raise packet_reader_error('error : read_iq_packet.header')
-    if buff[-1] != footer:
-        raise packet_reader_error('error : read_iq_packet.footer')
+        raise PacketReaderError('error : read_iq_packet.size')
+    if buff[0] not in [HEADER_DATA, HEADER_SGSYNC]:
+        raise PacketReaderError('error : read_iq_packet.HEADER_DATA')
+    if buff[-1] != FOOTER:
+        raise PacketReaderError('error : read_iq_packet.FOOTER')
     t = (unpack('b', buff[1:2])[0] << (8 * 4)) + unpack('>I', buff[2:6])[0]
     data = []
     for dn in range(int(dlen)):
@@ -111,11 +112,11 @@ def read_iq_packet(buff, n_rot = -1, sync_off = 0):
 def read_sync_packet(buff):
     dlen = (len(buff) - 7) / 7
     if len(buff) != dlen * 7 + 7:
-        raise packet_reader_error('error : read_sync_packet.size')
-    if buff[0] != header_sync:
-        raise packet_reader_error('error : read_sync_packet.header')
-    if buff[-1] != footer:
-        raise packet_reader_error('error : read_sync_packet.footer')
+        raise PacketReaderError('error : read_sync_packet.size')
+    if buff[0] != HEADER_SYNC:
+        raise PacketReaderError('error : read_sync_packet.HEADER_DATA')
+    if buff[-1] != FOOTER:
+        raise PacketReaderError('error : read_sync_packet.FOOTER')
     n_rot = (unpack('b', buff[1:2])[0] << (8 * 4)) + unpack('>I', buff[2:6])[0] # ts = n_rot
     d1 = unpack('b',  buff[6  :6+1])[0]
     d2 = unpack('>H', buff[6+1:6+3])[0]
@@ -125,11 +126,11 @@ def read_sync_packet(buff):
 
 def read_snap_packet(buff, n_rot = -1, sync_off = 0):
     if len(buff) != 15:
-        raise packet_reader_error('error : read_snap_packet.size')
-    if buff[0] != header:
-        raise packet_reader_error('error : read_snap_packet.header')
-    if buff[-1] != footer:
-        raise packet_reader_error('error : read_snap_packet.footer')
+        raise PacketReaderError('error : read_snap_packet.size')
+    if buff[0] != HEADER_DATA:
+        raise PacketReaderError('error : read_snap_packet.HEADER_DATA')
+    if buff[-1] != FOOTER:
+        raise PacketReaderError('error : read_snap_packet.FOOTER')
     t = (unpack('b', buff[1:2])[0] << (8 * 4)) + unpack('>I', buff[2:6])[0]
     d1 = unpack('>i', buff[ 6:10])[0]
     d2 = unpack('>i', buff[10:14])[0]
@@ -145,7 +146,7 @@ def seek_sync(fd, read_packet, packet_size, offset=0):
     while True:
         fd.seek(packet_size * it_begin)
         buff = fd.read(packet_size)
-        if buff[0] == header:
+        if buff[0] == HEADER_DATA:
             ts_begin, _, _, _ = read_packet(buff)
             break
         else:
@@ -156,7 +157,7 @@ def seek_sync(fd, read_packet, packet_size, offset=0):
     while ts_end - ts_begin != offset:
         fd.seek(packet_size * it_end)
         buff = fd.read(packet_size)
-        if buff[0] == header:
+        if buff[0] == HEADER_DATA:
             ts_end, _, _, _ = read_packet(buff)
             it_end += offset - (ts_end - ts_begin)
         else:
@@ -178,10 +179,10 @@ def seek_sync(fd, read_packet, packet_size, offset=0):
         while it < it_end:
             fd.seek(packet_size * it)
             buff = fd.read(packet_size)
-            if buff[0] == header:
+            if buff[0] == HEADER_DATA:
                 ts, _, _, _ = read_packet(buff)
                 break
-            elif buff[0] == header_sync:
+            elif buff[0] == HEADER_SYNC:
                 n_rot, sync_off = read_sync_packet(buff)
             it += 1
 
@@ -202,7 +203,7 @@ def _read_file(filename, packet_size = None, length = None, offset = 0, read_pac
     cnt = 0
     f = open(filename, 'rb')
     ## HEADER
-    buff += f.read(buffsize*2)
+    buff += f.read(BUFFSIZE*2)
     yield read_packet(buff[0:packet_size])
 
     ## BODY
@@ -211,7 +212,7 @@ def _read_file(filename, packet_size = None, length = None, offset = 0, read_pac
 
     while True:
         if type(length) == int and cnt >= length: break
-        if len(buff) < packet_size: buff += f.read(buffsize)
+        if len(buff) < packet_size: buff += f.read(BUFFSIZE)
         if len(buff) < packet_size: break
         readcnt += 1
         if readcnt % step ==0:
@@ -230,7 +231,7 @@ def _read_file_sync(filename, packet_size = None, length = None, offset = 0, rea
     readcnt = -1
     f = open(filename, 'rb')
     ## HEADER
-    buff += f.read(buffsize*2)
+    buff += f.read(BUFFSIZE*2)
     yield read_packet(buff[0:packet_size])
 
     ## BODY
@@ -240,9 +241,9 @@ def _read_file_sync(filename, packet_size = None, length = None, offset = 0, rea
     try:
         while True:
             if type(length) == int and cnt >= length: break
-            if len(buff) < packet_size: buff += f.read(buffsize)
+            if len(buff) < packet_size: buff += f.read(BUFFSIZE)
             if len(buff) < packet_size: break
-            if buff[0] == header_sync:
+            if buff[0] == HEADER_SYNC:
                 n_rot, sync_off = read_sync_packet(buff[0:packet_size])
             else:
                 readcnt += 1
@@ -254,7 +255,7 @@ def _read_file_sync(filename, packet_size = None, length = None, offset = 0, rea
             pass
         pass
 
-    except packet_reader_error as e:
+    except PacketReaderError as e:
         print(e)
 
 
@@ -295,8 +296,8 @@ def read_file(filename, packet_size = None, length = None, offset = 0, sync=Fals
 #     f.seek(packet_size * offset)
 
 #     for i in range(length):
-#         if len(buff) < packet_size: buff += f.read(buffsize)
-#         if len(buff) < packet_size: raise packet_reader_error('end_of_file')
+#         if len(buff) < packet_size: buff += f.read(BUFFSIZE)
+#         if len(buff) < packet_size: raise PacketReaderError('end_of_file')
 #         yield read_iq_packet(buff[0:packet_size])
 #         buff = buff[packet_size:]
 #         pass
@@ -315,8 +316,8 @@ def read_file(filename, packet_size = None, length = None, offset = 0, sync=Fals
 #     f.seek(packet_size * offset)
 
 #     for i in range(length):
-#         if len(buff) < packet_size: buff += f.read(buffsize)
-#         if len(buff) < packet_size: raise packet_reader_error('end_of_file')
+#         if len(buff) < packet_size: buff += f.read(BUFFSIZE)
+#         if len(buff) < packet_size: raise PacketReaderError('end_of_file')
 #         yield read_snap_packet(buff[0:packet_size])
 #         buff = buff[packet_size:]
 #         pass
