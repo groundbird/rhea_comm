@@ -41,7 +41,7 @@ class FPGAControl:
         self._verbose = verbose
         self.__lock_path = '/tmp/.'+ip_address+'.lock'
         self._vprint(f'lock file: {self.__lock_path}')
-
+        
         ## lock file
         try:
             if not IS_WINDOWS:
@@ -100,14 +100,21 @@ class FPGAControl:
                 print(*args, **kwargs, file=sys.stderr)
 
 
-    def init(self):
+#    def init(self):
+    def init(self, swap_dac=True, swap_adc=True):        
         '''Initialize FPGA'''
-        self._vprint(f'Firmware version: {self.info.version:d}')
+#        self._vprint(f'Firmware version: {self.info.version:d}')
+        #self._vprint(f'Firmware version: {self.info.version:d}, SWAP_DAC={swap_dac}/SWAP_ADC={swap_adc}')
+        print(f'Firmware version: {self.info.version:d}, SWAP_DAC={swap_dac}/SWAP_ADC={swap_adc}')
 
         self.adc_setting.reset()
         self.dac_setting.reset()
 
-        self.dac_setting.channel_swap()
+        if swap_dac:
+            self.dac_setting.channel_swap()
+        if swap_adc:
+            self.adc_setting.channel_swap()
+        #self.dac_setting.channel_swap()
         # self.adc.channel_swap()
         self.dac_setting.txenable_on()
 

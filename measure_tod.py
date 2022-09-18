@@ -21,7 +21,7 @@ class TODError(Exception):
 
 ## main
 def measure_tod(fpga:FPGAControl, max_ch, dds_f_megahz, data_length,
-                rate_ksps, power, fname, amps=None, phases=None, verbose=True):
+                rate_ksps, power, fname, amps=None, phases=None, verbose=True, swap_dac=True, swap_adc=True):
     '''Measure time-ordered data.
 
     Parameters
@@ -44,6 +44,10 @@ def measure_tod(fpga:FPGAControl, max_ch, dds_f_megahz, data_length,
         Amplitude of tones.
     phases : list of float
         DDS initial phases in radian.
+    swap_dac : boolean, optional
+        Whether I and Q for DAC are swapped or not.
+    swap_adc : boolean, optional
+        Whether I and Q for ADC are swapped or not.
     '''
     def _vprint(*pargs, **pkwargs):
         if verbose:
@@ -56,7 +60,7 @@ def measure_tod(fpga:FPGAControl, max_ch, dds_f_megahz, data_length,
 
     if phases is None:
         phases = [0.]*len(dds_f_megahz)
-
+    fpga.init(swap_dac=swap_dac, swap_adc=swap_adc)
     fpga.iq_setting.set_read_width(len(dds_f_megahz))
 
     if power < 0:
@@ -261,7 +265,7 @@ def main():
         if phases is not None:
             phases.append(0.)
 
-    fpga.init()
+    #fpga.init()
     measure_tod(fpga        = fpga,
                 max_ch      = max_ch,
                 dds_f_megahz   = dds_f_megahz,

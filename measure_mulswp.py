@@ -15,7 +15,7 @@ class MulswpError(Exception):
 
 ## main
 def measure_mulswp(fpga:FPGAControl, max_ch, dds_f_megahz, width, step, fname,
-                   power, amps=None, phases=None, f_off=None, verbose=True):
+                   power, amps=None, phases=None, f_off=None, verbose=True, swap_dac=True, swap_adc=True):
     '''Perform multi-channel sweep.
 
     Parameters
@@ -40,6 +40,10 @@ def measure_mulswp(fpga:FPGAControl, max_ch, dds_f_megahz, width, step, fname,
         Initial phase list in radians.
     f_off : float, optional
         Frequency of off-resonance measurement in MHz.
+    swap_dac : boolean, optional
+        Whether I and Q for DAC are swapped or not.
+    swap_adc : boolean, optional
+        Whether I and Q for ADC are swapped or not.
     '''
     def _vprint(*pargs, **pkwargs):
         if verbose:
@@ -88,7 +92,8 @@ def measure_mulswp(fpga:FPGAControl, max_ch, dds_f_megahz, width, step, fname,
     _vprint('MULTI-SWEEP MEASUREMENT')
     _vprint(f'SwpPower: {power:d}*{input_len}/{max_ch:d}')
 
-    fpga.init()
+    #fpga.init()
+    fpga.init(swap_dac=swap_dac, swap_adc=swap_adc)
     print(f'Input len: {input_len}')
     fpga.iq_setting.set_read_width(input_len)
 

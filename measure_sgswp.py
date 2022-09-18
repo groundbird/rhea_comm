@@ -4,7 +4,8 @@ from time import sleep
 from sg_sweep_sync import Sweep
 
 ## constant
-from fpga_control import fpga_control
+#from fpga_control import fpga_control
+from fpga_control  import FPGAControl
 
 class FUnit(object):
     mHz, Hz, kHz, MHz, GHz = 1e-3, 1.0, 1e+3, 1e+6, 1e+9
@@ -48,7 +49,7 @@ def measure_sgswp(fpga,
             pass
 
     fpga.init()
-    fpga.iq.set_read_width(len(dds_f_MHz))
+    fpga.iq_setting.set_read_width(len(dds_f_MHz))
 
     if power<0:
         dds_f_Hz_multi  = [freq * 1e6 for freq in dds_f_MHz]
@@ -60,7 +61,7 @@ def measure_sgswp(fpga,
 
     print("INPUT FREQ LIST")
     print(dds_f_Hz_multi)
-    fpga.dds.set_freqs(dds_f_Hz_multi)
+    fpga.dds_setting.set_freqs(dds_f_Hz_multi)
 
     if amps is not None:
         if power<0:
@@ -71,9 +72,9 @@ def measure_sgswp(fpga,
 
         print("INPUT SCALE LIST")
         print(amp_multi)
-        fpga.dds.set_amps(amp_multi)
+        fpga.dds_setting.set_amps(amp_multi)
 
-    fpga.ds.set_rate(floor(200000 / rate_kSPS+0.5))
+    fpga.ds_setting.set_accum(floor(200000 / rate_kSPS+0.5))
 
     f = open(fname, 'wb')
 
@@ -101,7 +102,7 @@ def measure_sgswp(fpga,
     cnt_print = cnt_step
 
     fpga.tcp.clear()
-    fpga.iq.iq_on()
+    fpga.iq_setting.iq_on()
     sleep(0.001)
     tmp = swp.send_command()
 
@@ -121,8 +122,8 @@ def measure_sgswp(fpga,
         print('stop measurement')
     finally:
         f.close()
-        fpga.iq.iq_off()
-        fpga.dac.txenable_off()
+        fpga.iq_setting.iq_off()
+        fpga.dac_setting.txenable_off()
         print(f'write raw data to {fname}')
         pass
 
@@ -219,8 +220,9 @@ if __name__ == '__main__':
     ip = args.ip_address
 
     try:
-        fpga = fpga_control(ip_address=ip)
-        MAX_CH = fpga.MAX_CH
+        fpga = FPGAControl(ip_address=ip)
+        # fpga = fpga_control(ip_address=ip)
+        MAX_CH = fpga.max_ch
 
         if len(freqs) > MAX_CH:
             raise Exception(f'# of channel is over max: {MAX_CH}')
