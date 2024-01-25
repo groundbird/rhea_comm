@@ -163,7 +163,7 @@ def main():
     # Phase reconfiguration.
     scores = {}
 
-    for angle in range(0, 360, 45):
+    for angle in range(0, 360, 5):
         fpga.clock.phase_reconf(0, angle)
         fpga.init()
 
