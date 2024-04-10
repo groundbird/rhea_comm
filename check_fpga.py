@@ -37,31 +37,31 @@ def check_fpga(fpga, max_ch, dds_f_MHz, rate_kSPS=1, power=1, amps=None, phases=
         if len(dds_f_MHz) == 0: return
 
         vprint('-- iq.set_read_width()')
-        fpga.iq.set_read_width(len(dds_f_MHz))
+        fpga.iq_setting.set_read_width(len(dds_f_MHz))
         vprint('-- tcp.clear()')
         fpga.tcp.clear()
 
         dds_frq = [freq * 1e6 for freq in dds_f_MHz] * int(power) + [0.] * (max_ch - int(power)*len(dds_f_MHz))
         vprint(f'-- dds.set_freqs()    :  |'+'|'.join([f' {x:+4.3f} ' for x in dds_f_MHz])+'|')
-        fpga.dds.set_freqs(dds_frq)
+        fpga.dds_setting.set_freqs(dds_frq)
 
         amps = [1.]*len(dds_f_MHz) if amps is None else amps
         dds_amp = amps * int(power) + [0.] * (max_ch - int(power)*len(amps))
         vprint(f'-- dds.set_amps()     :  |'+'|'.join([f'  {x:1.4f} ' for x in amps])+'|')
-        fpga.dds.set_amps(dds_amp)
+        fpga.dds_setting.set_amps(dds_amp)
 
         phases = [0.]*len(dds_f_MHz) if phases is None else phases
         dds_phs = phases * int(power) + [0.] * (max_ch - int(power)*len(phases))
         vprint(f'-- dds.set_phases()   :  |'+'|'.join([f' {x:+1.4f} ' for x in phases])+'|')
-        fpga.dds.set_phases(dds_phs)
+        fpga.dds_setting.set_phases(dds_phs)
 
         vprint(f'-- dds.set_rate()')
-        fpga.ds.set_rate(floor(200.e3 / rate_kSPS + 0.5)) # 1e3 SPS
+        fpga.ds_setting.set_accum(floor(200.e3 / rate_kSPS + 0.5)) # 1e3 SPS
 
         vprint('-- iq.time_reset()')
-        fpga.iq.time_reset()
+        fpga.iq_setting.time_reset()
         vprint('-- iq.iq_on()')
-        fpga.iq.iq_on()
+        fpga.iq_setting.iq_on()
 
         if len(dds_f_MHz)>0:
             packet_size = get_packet_size(len(dds_f_MHz))
@@ -71,11 +71,11 @@ def check_fpga(fpga, max_ch, dds_f_MHz, rate_kSPS=1, power=1, amps=None, phases=
         print('stop by keyboard input')
     finally:
         vprint('-- iq.iq_off()')
-        fpga.iq.iq_off()
+        fpga.iq_setting.iq_off()
         vprint('-- tcp.clear()')
         fpga.tcp.clear()
         vprint('-- dac.txenable_off()')
-        fpga.dac.txenable_off()
+        fpga.dac_setting.txenable_off()
 
         if buff is not None:
             vprint('='*80)
